@@ -49,7 +49,7 @@ public class OrderExpiryScheduler {
                 .toList();
 
         for (Order order : activeOrders) {
-            Optional<Payment> optPayment = paymentRepository.findTopByOrderIdOrderByCreatedAtDesc(order.getId());
+            Optional<Payment> optPayment = paymentRepository.findByOrderId(order.getId());
             boolean isPaid = optPayment.isPresent() && optPayment.get().getStatus() == PaymentStatus.SUCCESS;
 
             if (!isPaid) {

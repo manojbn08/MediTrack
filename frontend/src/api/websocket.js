@@ -9,26 +9,39 @@ export function getWebSocketClient() {
     return stompClient;
   }
 
-  const socketUrl = (import.meta.env.VITE_API_URL || 'http://localhost:8080') + '/ws';
+  const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8080/api';
+  const baseUrl = apiUrl.replace(/\/api\/?$/, '');
+  const socketUrl = `${baseUrl}/ws`;
 
   stompClient = new Client({
-    webSocketFactory: () => new SockJS(socketUrl),
+    webSocketFactory: () => {
+      try {
+        return new SockJS(socketUrl);
+      } catch (e) {
+        console.warn('[STOMP] SockJS init warning:', e);
+        return null;
+      }
+    },
     reconnectDelay: 5000,
     heartbeatIncoming: 4000,
     heartbeatOutgoing: 4000,
-    debug: (str) => {
-      // In development, uncomment for verbose logging
-      // console.log('[STOMP]', str);
-    },
+    debug: () => {},
     onConnect: () => {
       console.log('[WEBSOCKET CONNECTED] STOMP session established on', socketUrl);
     },
     onStompError: (frame) => {
-      console.error('[WEBSOCKET ERROR]', frame.headers['message'], frame.body);
+      console.warn('[WEBSOCKET STOMP ERROR]', frame?.headers?.message);
+    },
+    onWebSocketError: (err) => {
+      // Graceful silence when backend is restarting
     },
   });
 
-  stompClient.activate();
+  try {
+    stompClient.activate();
+  } catch (err) {
+    console.warn('[STOMP Activation]', err);
+  }
   return stompClient;
 }
 

@@ -59,7 +59,7 @@ class OrderExpirySchedulerTest {
         expiredOrder.setItems(List.of(item));
 
         when(orderRepository.findAll()).thenReturn(List.of(expiredOrder));
-        when(paymentRepository.findTopByOrderIdOrderByCreatedAtDesc(101L)).thenReturn(Optional.empty());
+        when(paymentRepository.findByOrderId(101L)).thenReturn(Optional.empty());
 
         scheduler.cancelUnpaidOrders();
 
@@ -103,7 +103,7 @@ class OrderExpirySchedulerTest {
         successPayment.setStatus(PaymentStatus.SUCCESS);
 
         when(orderRepository.findAll()).thenReturn(List.of(paidOrder));
-        when(paymentRepository.findTopByOrderIdOrderByCreatedAtDesc(103L)).thenReturn(Optional.of(successPayment));
+        when(paymentRepository.findByOrderId(103L)).thenReturn(Optional.of(successPayment));
 
         scheduler.cancelUnpaidOrders();
 
