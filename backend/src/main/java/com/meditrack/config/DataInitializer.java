@@ -243,8 +243,8 @@ public class DataInitializer implements CommandLineRunner {
         readyDelivery.setDeliveryLng(77.6784);
         readyDelivery.setPickupAddress("MediTrack Central Pharmacy Hub, Brigade Rd, Bengaluru");
         readyDelivery.setDeliveryAddress("Flat 402, Green Glen Layout, Outer Ring Road, Bellandur, Bengaluru");
-        readyDelivery.setDistanceKm(5.8);
-        readyDelivery.setEtaMinutes(22);
+        readyDelivery.setDistanceKm(13.7);
+        readyDelivery.setEtaMinutes(41);
         readyDelivery.setPickupCode("PK-8812");
         readyDelivery.setDeliveryOtp("4921");
         readyDelivery.setCodAmount(192.0);

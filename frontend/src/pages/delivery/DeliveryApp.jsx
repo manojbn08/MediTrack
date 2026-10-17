@@ -19,24 +19,37 @@ import {
   Compass
 } from 'lucide-react';
 
-function calculateHaversine(lat1, lon1, lat2, lon2) {
+const CENTRAL_HUB = [12.9716, 77.5946]; // MediTrack Central Pharmacy Hub (Brigade Rd)
+const DEFAULT_PATROL_POST = [12.9650, 77.6000]; // Active Partner Patrol Station (Richmond Town, 1.1 km from Central Hub)
+
+function calculateHaversineRaw(lat1, lon1, lat2, lon2) {
   if (!lat1 || !lon1 || !lat2 || !lon2) return 0;
-  const R = 6371; // km
+  const R = 6371; // Earth radius in km
   const dLat = (lat2 - lat1) * Math.PI / 180;
   const dLon = (lon2 - lon1) * Math.PI / 180;
   const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
             Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
             Math.sin(dLon/2) * Math.sin(dLon/2);
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-  return Math.round(R * c * 10) / 10;
+  return R * c;
+}
+
+function calculateRoadDistance(lat1, lon1, lat2, lon2) {
+  const straight = calculateHaversineRaw(lat1, lon1, lat2, lon2);
+  // Standard urban road circuity factor 1.35x for realistic driving distance
+  return Math.max(0.2, Math.round(straight * 1.35 * 10) / 10);
 }
 
 export default function DeliveryApp() {
   const [online, setOnline] = useState(true);
   const [offers, setOffers] = useState([]);
   const [activeDelivery, setActiveDelivery] = useState(null);
-  const [riderPos, setRiderPos] = useState([12.9510, 77.6365]);
-  const [geoState, setGeoState] = useState({ active: false, loading: false, msg: '' });
+  const [riderPos, setRiderPos] = useState(DEFAULT_PATROL_POST);
+  const [geoState, setGeoState] = useState({ 
+    active: true, 
+    loading: false, 
+    msg: 'Central Hub Patrol Post (1.1 km from pharmacy hub)' 
+  });
   
   const [pickupCodeInput, setPickupCodeInput] = useState('');
   const [deliveryOtpInput, setDeliveryOtpInput] = useState('');
@@ -61,27 +74,43 @@ export default function DeliveryApp() {
       setGeoState({ active: false, loading: false, msg: 'Geolocation not supported by device.' });
       return;
     }
-    setGeoState({ active: false, loading: true, msg: 'Requesting device GPS permission...' });
+    setGeoState({ active: false, loading: true, msg: 'Calibrating delivery GPS position...' });
 
     navigator.geolocation.getCurrentPosition(
       (pos) => {
-        const lat = Math.round(pos.coords.latitude * 10000) / 10000;
-        const lng = Math.round(pos.coords.longitude * 10000) / 10000;
-        setRiderPos([lat, lng]);
+        const rawLat = pos.coords.latitude;
+        const rawLng = pos.coords.longitude;
+        const straightFromHub = calculateHaversineRaw(rawLat, rawLng, CENTRAL_HUB[0], CENTRAL_HUB[1]);
+
+        if (straightFromHub > 15.0) {
+          // Device is physically located outside the active 15 km Bengaluru delivery zone
+          // Calibrate rider position to active Central Hub Patrol Post for accurate simulation
+          setRiderPos(DEFAULT_PATROL_POST);
+          setGeoState({
+            active: true,
+            loading: false,
+            msg: `GPS detected ${straightFromHub.toFixed(1)} km away (outside 15 km zone). Calibrated to Central Hub Patrol Post (1.1 km from hub) for realistic dispatch.`
+          });
+        } else {
+          const lat = Math.round(rawLat * 10000) / 10000;
+          const lng = Math.round(rawLng * 10000) / 10000;
+          setRiderPos([lat, lng]);
+          setGeoState({
+            active: true,
+            loading: false,
+            msg: `Live GPS Active: (${lat.toFixed(4)}, ${lng.toFixed(4)}) • In Delivery Zone`
+          });
+        }
+      },
+      (err) => {
+        setRiderPos(DEFAULT_PATROL_POST);
         setGeoState({
           active: true,
           loading: false,
-          msg: `Live Location Active: (${lat.toFixed(4)}, ${lng.toFixed(4)})`
+          msg: 'GPS permission denied. Using Central Hub Patrol Post (1.1 km from pharmacy hub).'
         });
       },
-      (err) => {
-        setGeoState({
-          active: false,
-          loading: false,
-          msg: 'Location permission denied. Please enable GPS for real-time proximity calculation.'
-        });
-      },
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+      { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 }
     );
   };
 
@@ -128,15 +157,20 @@ export default function DeliveryApp() {
     try {
       const destLat = activeDelivery.deliveryLat || 12.9304;
       const destLng = activeDelivery.deliveryLng || 77.6784;
-      const nextLat = Math.round(((riderPos[0] + destLat) / 2) * 10000) / 10000;
-      const nextLng = Math.round(((riderPos[1] + destLng) / 2) * 10000) / 10000;
+      // Progress rider 35% closer along the route towards the destination
+      const nextLat = Math.round((riderPos[0] + (destLat - riderPos[0]) * 0.35) * 10000) / 10000;
+      const nextLng = Math.round((riderPos[1] + (destLng - riderPos[1]) * 0.35) * 10000) / 10000;
       setRiderPos([nextLat, nextLng]);
 
-      await api.post(`/delivery/${activeDelivery.id}/location`, {
+      const res = await api.post(`/delivery/${activeDelivery.id}/location`, {
         latitude: nextLat,
         longitude: nextLng
       });
-      setActionSuccess(`Live GPS updated (${nextLat}, ${nextLng}) and transmitted to customer.`);
+      const updated = res.data;
+      const remKm = updated?.distanceKm ?? calculateRoadDistance(nextLat, nextLng, destLat, destLng);
+      const remEta = updated?.etaMinutes ?? Math.max(2, Math.round(2 + (remKm / 22.0) * 60));
+
+      setActionSuccess(`Live GPS streamed: ~${remKm} km remaining, ETA: ~${remEta} mins (transmitted to customer map).`);
     } catch (err) {
       setError(err.response?.data?.message || err.message || 'GPS transmission failed');
     }
@@ -432,17 +466,17 @@ export default function DeliveryApp() {
                   <span className="font-semibold text-brand flex items-center gap-1.5">
                     <Radio className="w-3.5 h-3.5 animate-pulse text-brand" /> Live GPS Transceiver
                   </span>
-                  <span className="font-mono-numbers text-[10px] text-neutral-600">
-                    {riderPos[0].toFixed(4)}, {riderPos[1].toFixed(4)}
+                  <span className="font-mono-numbers text-[11px] font-semibold text-neutral-700">
+                    ~{calculateRoadDistance(riderPos[0], riderPos[1], activeDelivery.deliveryLat || 12.9304, activeDelivery.deliveryLng || 77.6784)} km to customer
                   </span>
                 </div>
                 <Button 
                   size="sm" 
                   variant="secondary"
-                  className="w-full text-xs" 
+                  className="w-full text-xs font-semibold" 
                   onClick={handlePushGpsLocation}
                 >
-                  📡 Stream Current GPS Position to Customer
+                  📡 Advance Route & Stream Live GPS to Customer
                 </Button>
               </div>
 
@@ -502,12 +536,16 @@ export default function DeliveryApp() {
               const dropLat = offer.deliveryLat || 12.9304;
               const dropLng = offer.deliveryLng || 77.6784;
 
-              // Distance from partner's live position to pharmacy
-              const distToPickup = calculateHaversine(riderPos[0], riderPos[1], pickupLat, pickupLng);
-              // Distance from partner's live position to delivery drop
-              const distToDrop = calculateHaversine(riderPos[0], riderPos[1], dropLat, dropLng);
-              // Distance between pharmacy and drop
-              const distRoute = calculateHaversine(pickupLat, pickupLng, dropLat, dropLng);
+              // Road driving distance from partner's live position to pharmacy pickup
+              const distToPickup = calculateRoadDistance(riderPos[0], riderPos[1], pickupLat, pickupLng);
+              const timeToPickup = Math.max(2, Math.round(2 + (distToPickup / 22.0) * 60));
+
+              // Road driving distance from pharmacy to customer delivery drop
+              const distDelivery = calculateRoadDistance(pickupLat, pickupLng, dropLat, dropLng);
+              const timeDelivery = Math.max(8, Math.round(4 + (distDelivery / 22.0) * 60));
+
+              // Total trip distance for the partner
+              const totalTripKm = Math.round((distToPickup + distDelivery) * 10) / 10;
 
               return (
                 <div 
@@ -520,7 +558,7 @@ export default function DeliveryApp() {
                         Order #{offer.orderId}
                       </span>
                       <span className="px-2 py-0.5 rounded-full bg-brand-tint text-brand text-[10px] font-semibold font-mono-numbers">
-                        ~{distRoute} km route
+                        ~{distDelivery} km delivery • Total trip ~{totalTripKm} km
                       </span>
                     </div>
 
@@ -537,7 +575,7 @@ export default function DeliveryApp() {
                           <Store className="w-3.5 h-3.5" /> 1. Pharmacy Pickup:
                         </span>
                         <span className="font-mono-numbers text-[11px] font-bold text-emerald-700 bg-emerald-100/70 px-1.5 py-0.2 rounded">
-                          {distToPickup} km from your location
+                          {distToPickup} km from you (~{timeToPickup} mins)
                         </span>
                       </div>
                       <p className="text-[11px] text-neutral-600 pl-4 mt-0.5">
@@ -551,7 +589,7 @@ export default function DeliveryApp() {
                           <MapPin className="w-3.5 h-3.5" /> 2. Customer Delivery:
                         </span>
                         <span className="font-mono-numbers text-[11px] font-bold text-brand bg-brand-tint px-1.5 py-0.2 rounded">
-                          {distToDrop} km from your location
+                          {distDelivery} km from pharmacy (~{timeDelivery} mins)
                         </span>
                       </div>
                       <p className="text-[11px] text-neutral-600 pl-4 mt-0.5">

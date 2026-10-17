@@ -298,9 +298,10 @@ public class OrderService {
                     Math.cos(Math.toRadians(12.9716)) * Math.cos(Math.toRadians(savedOrder.getDeliveryLat())) *
                     Math.sin(dLon / 2) * Math.sin(dLon / 2);
             double c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-            double distKm = Math.max(0.5, Math.round(6371.0 * c * 10.0) / 10.0);
-            d.setDistanceKm(distKm);
-            d.setEtaMinutes((int) Math.max(10.0, Math.round(5.0 + (distKm / 20.0) * 60.0)));
+            double straightKm = 6371.0 * c;
+            double roadKm = Math.max(0.5, Math.round(straightKm * 1.35 * 10.0) / 10.0);
+            d.setDistanceKm(roadKm);
+            d.setEtaMinutes((int) Math.max(10.0, Math.round(4.0 + (roadKm / 22.0) * 60.0)));
 
             d.setPickupCode(savedOrder.getPickupCode());
             d.setDeliveryOtp(savedOrder.getDeliveryOtp());

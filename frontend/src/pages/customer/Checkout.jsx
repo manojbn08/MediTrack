@@ -20,7 +20,7 @@ import {
 
 const PHARMACY_COORDS = [12.9716, 77.5946];
 
-function calculateHaversine(lat1, lon1, lat2, lon2) {
+function calculateHaversineRaw(lat1, lon1, lat2, lon2) {
   const R = 6371; // km
   const dLat = (lat2 - lat1) * Math.PI / 180;
   const dLon = (lon2 - lon1) * Math.PI / 180;
@@ -28,7 +28,12 @@ function calculateHaversine(lat1, lon1, lat2, lon2) {
             Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
             Math.sin(dLon/2) * Math.sin(dLon/2);
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-  return Math.round(R * c * 10) / 10;
+  return R * c;
+}
+
+function calculateRoadDistance(lat1, lon1, lat2, lon2) {
+  const straight = calculateHaversineRaw(lat1, lon1, lat2, lon2);
+  return Math.max(0.5, Math.round(straight * 1.35 * 10) / 10);
 }
 
 export default function Checkout({ cart, onOrderPlaced }) {
@@ -51,8 +56,10 @@ export default function Checkout({ cart, onOrderPlaced }) {
     lng: 77.6784,
   });
 
-  const distanceKm = calculateHaversine(PHARMACY_COORDS[0], PHARMACY_COORDS[1], address.lat, address.lng);
-  const isOutOfDeliveryRange = distanceKm > 15.0;
+  const straightDistanceKm = calculateHaversineRaw(PHARMACY_COORDS[0], PHARMACY_COORDS[1], address.lat, address.lng);
+  const roadDistanceKm = calculateRoadDistance(PHARMACY_COORDS[0], PHARMACY_COORDS[1], address.lat, address.lng);
+  const estimatedEtaMins = Math.max(10, Math.round(4.0 + (roadDistanceKm / 22.0) * 60.0));
+  const isOutOfDeliveryRange = straightDistanceKm > 15.0;
 
   const items = cart?.items || [];
   const hasRx = items.some(item => item.product.requiresPrescription);
@@ -105,7 +112,7 @@ export default function Checkout({ cart, onOrderPlaced }) {
   const handlePlaceOrderClick = () => {
     setError('');
     if (isOutOfDeliveryRange) {
-      setError(`Delivery location is ${distanceKm} km away, exceeding our 15.0 km licensed delivery radius.`);
+      setError(`Delivery location is ${roadDistanceKm} km away, exceeding our 15.0 km licensed delivery radius.`);
       return;
     }
     if (!address.line1 || !address.pincode) {
@@ -260,6 +267,29 @@ export default function Checkout({ cart, onOrderPlaced }) {
                 lng={address.lng} 
                 onLocationChange={handleLocationPicked} 
               />
+
+              {/* Delivery Proximity & Road Distance Summary */}
+              <div className={`p-2.5 rounded-control border text-xs flex items-center justify-between ${
+                isOutOfDeliveryRange 
+                  ? 'bg-red-50 border-red-200 text-semantic-danger' 
+                  : 'bg-teal-50/70 border-teal-200 text-neutral-800'
+              }`}>
+                <div className="flex items-center gap-2">
+                  <MapPin className="w-4 h-4 text-brand shrink-0" />
+                  <span>
+                    {isOutOfDeliveryRange ? (
+                      <strong>Out of Range ({roadDistanceKm} km road distance) - 15 km max radius</strong>
+                    ) : (
+                      <span>Road Distance: <strong>{roadDistanceKm} km</strong> from Central Pharmacy</span>
+                    )}
+                  </span>
+                </div>
+                {!isOutOfDeliveryRange && (
+                  <span className="font-mono-numbers text-[11px] font-semibold text-brand bg-white px-2 py-0.5 rounded border border-teal-200">
+                    Est. delivery in ~{estimatedEtaMins} mins
+                  </span>
+                )}
+              </div>
             </div>
           </div>
 

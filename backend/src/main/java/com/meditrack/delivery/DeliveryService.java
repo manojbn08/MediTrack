@@ -20,6 +20,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 @Service
 public class DeliveryService {
@@ -81,6 +82,16 @@ public class DeliveryService {
         delivery.setPartnerPhone(partner.getPhone());
         delivery.setStatus(DeliveryStatus.ASSIGNED);
         delivery.setAssignedAt(LocalDateTime.now());
+
+        Optional<DeliveryPartnerProfile> profileOpt = deliveryPartnerProfileRepository.findById(partnerId);
+        if (profileOpt.isPresent()) {
+            DeliveryPartnerProfile profile = profileOpt.get();
+            if (profile.getCurrentLat() != null && profile.getCurrentLng() != null) {
+                delivery.setCurrentLat(profile.getCurrentLat());
+                delivery.setCurrentLng(profile.getCurrentLng());
+            }
+        }
+
         delivery = deliveryRepository.save(delivery);
 
         Order order = orderRepository.findById(delivery.getOrderId()).orElseThrow();
@@ -134,20 +145,23 @@ public class DeliveryService {
                 .orElseThrow(() -> new BusinessException("Delivery not found", HttpStatus.NOT_FOUND));
 
         delivery.setStatus(DeliveryStatus.IN_TRANSIT);
-        delivery = deliveryRepository.save(delivery);
 
         Order order = orderRepository.findById(delivery.getOrderId()).orElseThrow();
         orderStateMachine.transition(order, OrderStatus.OUT_FOR_DELIVERY, "DELIVERY", "Partner is on the way. Delivery OTP generated.");
         orderRepository.save(order);
 
-        double distanceKm = calculateHaversine(delivery.getPickupLat(), delivery.getPickupLng(), delivery.getDeliveryLat(), delivery.getDeliveryLng());
-        double etaMinutes = Math.max(10.0, Math.round((5.0 + (distanceKm / 20.0) * 60.0) * 10.0) / 10.0);
+        double roadDistanceKm = calculateRoadDistance(delivery.getPickupLat(), delivery.getPickupLng(), delivery.getDeliveryLat(), delivery.getDeliveryLng());
+        double etaMinutes = Math.max(10.0, Math.round(4.0 + (roadDistanceKm / 22.0) * 60.0));
+
+        delivery.setDistanceKm(roadDistanceKm);
+        delivery.setEtaMinutes((int) etaMinutes);
+        delivery = deliveryRepository.save(delivery);
 
         realtimeTrackingService.publishOrderStatus(
                 order.getId(),
                 order.getOrderNumber(),
                 OrderStatus.OUT_FOR_DELIVERY.name(),
-                "Partner is on the way with your medicines. ETA: " + (int)etaMinutes + " mins",
+                "Partner is on the way with your medicines. ETA: " + (int)etaMinutes + " mins (" + roadDistanceKm + " km)",
                 etaMinutes
         );
 
@@ -166,15 +180,25 @@ public class DeliveryService {
             deliveryPartnerProfileRepository.save(p);
         });
 
-        double remainingKm = calculateHaversine(lat, lng, delivery.getDeliveryLat(), delivery.getDeliveryLng());
-        double etaMinutes = Math.max(2.0, Math.round(((remainingKm / 20.0) * 60.0) * 10.0) / 10.0);
+        // Compute straight-line distance to destination and apply road circuity factor (1.35x)
+        double straightKm = calculateHaversine(lat, lng, delivery.getDeliveryLat(), delivery.getDeliveryLng());
+        // Cap straightKm to operational zone boundary (15.0 km) to safeguard against invalid remote GPS
+        double effectiveStraightKm = Math.min(15.0, straightKm);
+        double remainingRoadKm = Math.max(0.2, Math.round(effectiveStraightKm * 1.35 * 10.0) / 10.0);
+        double etaMinutes = Math.max(2.0, Math.round(2.0 + (remainingRoadKm / 22.0) * 60.0));
+
+        delivery.setCurrentLat(lat);
+        delivery.setCurrentLng(lng);
+        delivery.setDistanceKm(remainingRoadKm);
+        delivery.setEtaMinutes((int) etaMinutes);
+        delivery = deliveryRepository.save(delivery);
 
         realtimeTrackingService.publishDeliveryLocation(
                 delivery.getOrderId(),
                 lat,
                 lng,
                 delivery.getStatus().name(),
-                remainingKm,
+                remainingRoadKm,
                 etaMinutes
         );
 
@@ -263,5 +287,11 @@ public class DeliveryService {
                 * Math.sin(dLon / 2) * Math.sin(dLon / 2);
         double c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
         return Math.round(R * c * 100.0) / 100.0;
+    }
+
+    public double calculateRoadDistance(double lat1, double lon1, double lat2, double lon2) {
+        double straight = calculateHaversine(lat1, lon1, lat2, lon2);
+        // Standard urban road circuity factor 1.35x
+        return Math.max(0.2, Math.round(straight * 1.35 * 10.0) / 10.0);
     }
 }

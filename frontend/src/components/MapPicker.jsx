@@ -44,6 +44,17 @@ function PanToCenter({ center }) {
   return null;
 }
 
+function calculateDistanceKm(lat1, lon1, lat2, lon2) {
+  const R = 6371;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+            Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+            Math.sin(dLon/2) * Math.sin(dLon/2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  return R * c;
+}
+
 export default function MapPicker({ lat, lng, onLocationChange, pharmacyPos = [12.9716, 77.5946] }) {
   const currentPos = [lat || 12.9304, lng || 77.6784];
   const [geoStatus, setGeoStatus] = useState({ state: 'idle', message: '' });
@@ -60,11 +71,20 @@ export default function MapPicker({ lat, lng, onLocationChange, pharmacyPos = [1
       (position) => {
         const userLat = position.coords.latitude;
         const userLng = position.coords.longitude;
-        onLocationChange(userLat, userLng);
-        setGeoStatus({
-          state: 'success',
-          message: `Live Location Detected (${userLat.toFixed(4)}, ${userLng.toFixed(4)})`
-        });
+        const distFromHub = calculateDistanceKm(pharmacyPos[0], pharmacyPos[1], userLat, userLng);
+
+        if (distFromHub > 15.0) {
+          setGeoStatus({
+            state: 'error',
+            message: `Detected device GPS is ${distFromHub.toFixed(1)} km away, outside our 15 km Bengaluru zone. Please pick a location within Bengaluru.`
+          });
+        } else {
+          onLocationChange(userLat, userLng);
+          setGeoStatus({
+            state: 'success',
+            message: `Live Location Detected (${userLat.toFixed(4)}, ${userLng.toFixed(4)}) • In Delivery Zone`
+          });
+        }
       },
       (error) => {
         let msg = 'Location permission denied. Please allow location access or select manually.';

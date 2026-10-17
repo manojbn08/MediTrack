@@ -21,13 +21,26 @@ import {
   AlertCircle
 } from 'lucide-react';
 
+function calculateRoadDistance(lat1, lon1, lat2, lon2) {
+  if (!lat1 || !lon1 || !lat2 || !lon2) return 0;
+  const R = 6371; // Earth radius in km
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+            Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+            Math.sin(dLon/2) * Math.sin(dLon/2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  return Math.max(0.2, Math.round(R * c * 1.35 * 10) / 10);
+}
+
 export default function OrderTracking() {
   const { id } = useParams();
   const [order, setOrder] = useState(null);
   const [delivery, setDelivery] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [riderPos, setRiderPos] = useState([12.9510, 77.6365]);
-  const [etaMinutes, setEtaMinutes] = useState(20);
+  const [riderPos, setRiderPos] = useState([12.9650, 77.6000]);
+  const [etaMinutes, setEtaMinutes] = useState(null);
+  const [remainingKm, setRemainingKm] = useState(null);
   const [showReturnModal, setShowReturnModal] = useState(false);
   const [returnReason, setReturnReason] = useState('');
   const [returnSubmitting, setReturnSubmitting] = useState(false);
@@ -58,6 +71,9 @@ export default function OrderTracking() {
           if (delRes.data?.etaMinutes != null) {
             setEtaMinutes(delRes.data.etaMinutes);
           }
+          if (delRes.data?.distanceKm != null) {
+            setRemainingKm(delRes.data.distanceKm);
+          }
         } catch {
           // Delivery record might not exist until assigned
         }
@@ -73,6 +89,9 @@ export default function OrderTracking() {
     // Subscribe to real-time status and live GPS location via WebSocket
     const unsubStatus = subscribeToTopic(`/topic/orders/${id}/status`, (msg) => {
       setOrder(prev => prev ? { ...prev, ...msg, status: msg.status || prev.status } : msg);
+      if (msg?.etaMinutes != null) {
+        setEtaMinutes(Math.round(msg.etaMinutes));
+      }
     });
 
     const unsubLoc = subscribeToTopic(`/topic/orders/${id}/location`, (loc) => {
@@ -82,7 +101,10 @@ export default function OrderTracking() {
         setRiderPos([loc.lat, loc.lng]);
       }
       if (loc?.etaMinutes != null) {
-        setEtaMinutes(loc.etaMinutes);
+        setEtaMinutes(Math.round(loc.etaMinutes));
+      }
+      if (loc?.remainingDistanceKm != null) {
+        setRemainingKm(Math.round(loc.remainingDistanceKm * 10) / 10);
       }
     });
 
@@ -110,6 +132,14 @@ export default function OrderTracking() {
       </div>
     );
   }
+
+  const destLat = order.deliveryLat || 12.9304;
+  const destLng = order.deliveryLng || 77.6784;
+  const routeDistanceKm = calculateRoadDistance(12.9716, 77.5946, destLat, destLng);
+  const liveRemainingKm = remainingKm != null ? remainingKm : routeDistanceKm;
+  const effectiveEta = etaMinutes != null 
+    ? etaMinutes 
+    : Math.max(10, Math.round(4.0 + (routeDistanceKm / 22.0) * 60.0));
 
   // Lifecycle steps for vertical timeline
   const steps = [
@@ -311,9 +341,25 @@ export default function OrderTracking() {
                 <MapPin className="w-4 h-4 text-brand" />
                 <span>Live Fulfillment & Delivery Map</span>
               </h2>
-              <span className="text-xs text-neutral-500 font-mono-numbers">
-                ETA: ~{etaMinutes} mins
-              </span>
+              <div>
+                {order.status === 'DELIVERED' ? (
+                  <span className="text-xs font-semibold text-semantic-success bg-emerald-50 px-2.5 py-1 rounded border border-emerald-200">
+                    ✓ Delivered
+                  </span>
+                ) : order.status === 'OUT_FOR_DELIVERY' ? (
+                  <span className="text-xs font-semibold text-brand bg-brand-tint px-2.5 py-1 rounded border border-teal-200 font-mono-numbers">
+                    ETA: ~{effectiveEta} mins ({liveRemainingKm} km away)
+                  </span>
+                ) : order.status === 'PICKED_UP' ? (
+                  <span className="text-xs font-medium text-brand bg-brand-tint px-2.5 py-1 rounded border border-teal-200 font-mono-numbers">
+                    Picked up • Transit ~{effectiveEta} mins ({routeDistanceKm} km)
+                  </span>
+                ) : (
+                  <span className="text-xs text-neutral-600 bg-neutral-100 px-2.5 py-1 rounded border border-neutral-200 font-mono-numbers">
+                    Est. delivery: ~{effectiveEta} mins ({routeDistanceKm} km route)
+                  </span>
+                )}
+              </div>
             </div>
 
             <TrackingMap 

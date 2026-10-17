@@ -38,6 +38,12 @@ public class Delivery {
     @Column(name = "delivery_lng")
     private Double deliveryLng = 77.5946;
 
+    @Column(name = "current_lat")
+    private Double currentLat = 12.9716;
+
+    @Column(name = "current_lng")
+    private Double currentLng = 77.5946;
+
     @Column(name = "distance_km")
     private Double distanceKm = 4.2;
 
@@ -105,6 +111,12 @@ public class Delivery {
 
     public Double getDeliveryLng() { return deliveryLng; }
     public void setDeliveryLng(Double deliveryLng) { this.deliveryLng = deliveryLng; }
+
+    public Double getCurrentLat() { return currentLat; }
+    public void setCurrentLat(Double currentLat) { this.currentLat = currentLat; }
+
+    public Double getCurrentLng() { return currentLng; }
+    public void setCurrentLng(Double currentLng) { this.currentLng = currentLng; }
 
     public Double getDistanceKm() { return distanceKm; }
     public void setDistanceKm(Double distanceKm) { this.distanceKm = distanceKm; }
