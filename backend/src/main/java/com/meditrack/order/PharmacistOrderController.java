@@ -65,4 +65,14 @@ public class PharmacistOrderController {
         Order order = orderService.pharmacistMarkReadyForPickup(id, principal.getId());
         return ResponseEntity.ok(ApiResponse.ok("Order is packed and ready for pickup", order));
     }
+
+    @PostMapping("/verify-pickup")
+    public ResponseEntity<ApiResponse<Order>> verifyPickup(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @RequestBody Map<String, String> body) {
+        String orderNumber = body.get("orderNumber");
+        String pickupCode = body.get("pickupCode");
+        Order order = orderService.pharmacistVerifyAndDeliverPickup(orderNumber, pickupCode, principal.getId());
+        return ResponseEntity.ok(ApiResponse.ok("Pickup verified and order marked as DELIVERED", order));
+    }
 }

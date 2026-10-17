@@ -28,9 +28,11 @@ import java.util.List;
 public class SecurityConfig {
 
     private final JwtAuthFilter jwtAuthFilter;
+    private final RateLimitingFilter rateLimitingFilter;
 
-    public SecurityConfig(JwtAuthFilter jwtAuthFilter) {
+    public SecurityConfig(JwtAuthFilter jwtAuthFilter, RateLimitingFilter rateLimitingFilter) {
         this.jwtAuthFilter = jwtAuthFilter;
+        this.rateLimitingFilter = rateLimitingFilter;
     }
 
     @Bean
@@ -55,6 +57,8 @@ public class SecurityConfig {
                     "/api/auth/**",
                     "/api/catalog/**",
                     "/uploads/**",
+                    "/ws/**",
+                    "/ws-raw/**",
                     "/h2-console/**",
                     "/swagger-ui/**",
                     "/swagger-ui.html",
@@ -68,6 +72,7 @@ public class SecurityConfig {
                 .requestMatchers("/api/customer/**").hasAnyAuthority("ROLE_CUSTOMER", "ROLE_ADMIN")
                 .anyRequest().authenticated()
             )
+            .addFilterBefore(rateLimitingFilter, UsernamePasswordAuthenticationFilter.class)
             .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();

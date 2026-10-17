@@ -11,24 +11,26 @@ import java.util.List;
 public class CatalogController {
 
     private final CatalogService catalogService;
+    private final ProductMapper productMapper;
 
-    public CatalogController(CatalogService catalogService) {
+    public CatalogController(CatalogService catalogService, ProductMapper productMapper) {
         this.catalogService = catalogService;
+        this.productMapper = productMapper;
     }
 
     @GetMapping("/products")
-    public ResponseEntity<ApiResponse<List<Product>>> getProducts(
+    public ResponseEntity<ApiResponse<List<com.meditrack.catalog.dto.ProductResponseDto>>> getProducts(
             @RequestParam(required = false) String q,
             @RequestParam(required = false) Long category,
             @RequestParam(required = false) Boolean rx) {
         List<Product> products = catalogService.getProducts(q, category, rx);
-        return ResponseEntity.ok(ApiResponse.ok(products));
+        return ResponseEntity.ok(ApiResponse.ok(productMapper.toDtoList(products)));
     }
 
     @GetMapping("/products/{id}")
-    public ResponseEntity<ApiResponse<Product>> getProduct(@PathVariable Long id) {
+    public ResponseEntity<ApiResponse<com.meditrack.catalog.dto.ProductResponseDto>> getProduct(@PathVariable Long id) {
         Product product = catalogService.getProductById(id);
-        return ResponseEntity.ok(ApiResponse.ok(product));
+        return ResponseEntity.ok(ApiResponse.ok(productMapper.toDto(product)));
     }
 
     @GetMapping("/categories")

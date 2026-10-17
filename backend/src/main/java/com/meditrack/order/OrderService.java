@@ -17,6 +17,7 @@ import com.meditrack.prescription.PrescriptionRepository;
 import com.meditrack.prescription.PrescriptionStatus;
 import com.meditrack.user.User;
 import com.meditrack.user.UserRepository;
+import com.meditrack.notification.EmailService;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -37,6 +38,8 @@ public class OrderService {
     private final UserRepository userRepository;
     private final PaymentRepository paymentRepository;
     private final DeliveryRepository deliveryRepository;
+    private final EmailService emailService;
+    private final RealtimeTrackingService realtimeTrackingService;
 
     public OrderService(OrderRepository orderRepository,
                         OrderItemRepository orderItemRepository,
@@ -46,7 +49,9 @@ public class OrderService {
                         PrescriptionRepository prescriptionRepository,
                         UserRepository userRepository,
                         PaymentRepository paymentRepository,
-                        DeliveryRepository deliveryRepository) {
+                        DeliveryRepository deliveryRepository,
+                        EmailService emailService,
+                        RealtimeTrackingService realtimeTrackingService) {
         this.orderRepository = orderRepository;
         this.orderItemRepository = orderItemRepository;
         this.orderStateMachine = orderStateMachine;
@@ -56,6 +61,8 @@ public class OrderService {
         this.userRepository = userRepository;
         this.paymentRepository = paymentRepository;
         this.deliveryRepository = deliveryRepository;
+        this.emailService = emailService;
+        this.realtimeTrackingService = realtimeTrackingService;
     }
 
     public static class CheckoutRequest {
@@ -190,6 +197,19 @@ public class OrderService {
         // Clear cart
         cartService.clearCart(customerId);
 
+        // Asynchronously dispatch email notification
+        if (user.getEmail() != null && !user.getEmail().isBlank()) {
+            emailService.sendOrderConfirmation(order, user.getEmail());
+        }
+
+        // Broadcast real-time order status via STOMP WebSocket
+        realtimeTrackingService.publishOrderStatus(
+                order.getId(),
+                order.getOrderNumber(),
+                order.getStatus().name(),
+                "Order placed successfully"
+        );
+
         return order;
     }
 
@@ -288,6 +308,40 @@ public class OrderService {
                 inventoryService.releaseReservedStock(oi.getBatchId(), oi.getQuantity(), order.getId());
             }
         }
-        return orderRepository.save(order);
+        Order savedOrder = orderRepository.save(order);
+        realtimeTrackingService.publishOrderStatus(savedOrder.getId(), savedOrder.getOrderNumber(), savedOrder.getStatus().name(), reason);
+        return savedOrder;
+    }
+
+    @Transactional
+    public Order pharmacistVerifyAndDeliverPickup(String orderNumber, String pickupCode, Long pharmacistId) {
+        Order order = orderRepository.findByOrderNumber(orderNumber)
+                .orElseThrow(() -> new BusinessException("Order not found with number: " + orderNumber, HttpStatus.NOT_FOUND));
+
+        if (pickupCode == null || !pickupCode.trim().equalsIgnoreCase(order.getPickupCode().trim())) {
+            throw new BusinessException("Invalid pickup code provided for order " + orderNumber, HttpStatus.BAD_REQUEST);
+        }
+
+        // Deduct picked stock from batches if not already deducted
+        for (OrderItem oi : order.getItems()) {
+            if (oi.getBatchId() != null) {
+                try {
+                    inventoryService.confirmDeduction(oi.getBatchId(), oi.getQuantity(), order.getId());
+                } catch (Exception ignored) {}
+            }
+        }
+
+        order.setAssignedPharmacistId(pharmacistId);
+        orderStateMachine.transition(order, OrderStatus.DELIVERED, "PHARMACIST", "Handed over at counter with verified pickup QR/code");
+        Order saved = orderRepository.save(order);
+
+        realtimeTrackingService.publishOrderStatus(
+                saved.getId(),
+                saved.getOrderNumber(),
+                saved.getStatus().name(),
+                "Handed over at pharmacy counter"
+        );
+
+        return saved;
     }
 }

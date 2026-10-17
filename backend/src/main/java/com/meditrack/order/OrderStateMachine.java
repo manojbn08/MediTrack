@@ -18,7 +18,7 @@ public class OrderStateMachine {
         VALID_TRANSITIONS.put(OrderStatus.PRESCRIPTION_PENDING, Set.of(OrderStatus.CONFIRMED, OrderStatus.REJECTED, OrderStatus.CANCELLED));
         VALID_TRANSITIONS.put(OrderStatus.CONFIRMED, Set.of(OrderStatus.PROCESSING, OrderStatus.CANCELLED));
         VALID_TRANSITIONS.put(OrderStatus.PROCESSING, Set.of(OrderStatus.READY_FOR_PICKUP, OrderStatus.CANCELLED));
-        VALID_TRANSITIONS.put(OrderStatus.READY_FOR_PICKUP, Set.of(OrderStatus.ASSIGNED, OrderStatus.CANCELLED));
+        VALID_TRANSITIONS.put(OrderStatus.READY_FOR_PICKUP, Set.of(OrderStatus.ASSIGNED, OrderStatus.PICKED_UP, OrderStatus.DELIVERED, OrderStatus.CANCELLED));
         VALID_TRANSITIONS.put(OrderStatus.ASSIGNED, Set.of(OrderStatus.PICKED_UP, OrderStatus.CANCELLED));
         VALID_TRANSITIONS.put(OrderStatus.PICKED_UP, Set.of(OrderStatus.OUT_FOR_DELIVERY));
         VALID_TRANSITIONS.put(OrderStatus.OUT_FOR_DELIVERY, Set.of(OrderStatus.DELIVERED, OrderStatus.DELIVERY_FAILED));
