@@ -1,0 +1,40 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --brand-primary: #0F6B66;
+    --brand-hover: #0C5753;
+    --brand-pressed: #094541;
+    --brand-tint: #E6F2F1;
+    --surface-page: #F8F8F6;
+    --surface-panel: #FFFFFF;
+    --surface-border: #E2E0DB;
+  }
+
+  body {
+    background-color: var(--surface-page);
+    color: #1E1C19;
+    font-family: 'Inter', sans-serif;
+  }
+
+  /* Accessible clinical focus ring */
+  *:focus-visible {
+    outline: 2px solid #0F6B66;
+    outline-offset: 2px;
+  }
+}
+
+/* Custom table & monospace styling */
+.font-mono-numbers {
+  font-family: 'JetBrains Mono', monospace;
+  font-feature-settings: "tnum" 1;
+}
+
+/* Leaflet map container fix */
+.leaflet-container {
+  width: 100%;
+  height: 100%;
+  border-radius: 8px;
+}

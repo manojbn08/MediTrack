@@ -1,0 +1,179 @@
+package com.meditrack.delivery;
+
+import com.meditrack.common.BusinessException;
+import com.meditrack.order.Order;
+import com.meditrack.order.OrderRepository;
+import com.meditrack.order.OrderStatus;
+import com.meditrack.order.OrderStateMachine;
+import com.meditrack.payment.Payment;
+import com.meditrack.payment.PaymentRepository;
+import com.meditrack.payment.PaymentStatus;
+import com.meditrack.user.User;
+import com.meditrack.user.UserRepository;
+import org.springframework.http.HttpStatus;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Map;
+
+@Service
+public class DeliveryService {
+
+    private final DeliveryRepository deliveryRepository;
+    private final OrderRepository orderRepository;
+    private final OrderStateMachine orderStateMachine;
+    private final UserRepository userRepository;
+    private final PaymentRepository paymentRepository;
+
+    public DeliveryService(DeliveryRepository deliveryRepository,
+                           OrderRepository orderRepository,
+                           OrderStateMachine orderStateMachine,
+                           UserRepository userRepository,
+                           PaymentRepository paymentRepository) {
+        this.deliveryRepository = deliveryRepository;
+        this.orderRepository = orderRepository;
+        this.orderStateMachine = orderStateMachine;
+        this.userRepository = userRepository;
+        this.paymentRepository = paymentRepository;
+    }
+
+    @Transactional(readOnly = true)
+    public List<Delivery> getAvailableOffers() {
+        return deliveryRepository.findByStatus(DeliveryStatus.SEARCHING);
+    }
+
+    @Transactional(readOnly = true)
+    public List<Delivery> getPartnerHistory(Long partnerId) {
+        return deliveryRepository.findByPartnerIdOrderByAssignedAtDesc(partnerId);
+    }
+
+    @Transactional(readOnly = true)
+    public Delivery getDeliveryByOrderId(Long orderId) {
+        return deliveryRepository.findByOrderId(orderId)
+                .orElseThrow(() -> new BusinessException("Delivery not found for order id: " + orderId, HttpStatus.NOT_FOUND));
+    }
+
+    @Transactional
+    public Delivery acceptOffer(Long deliveryId, Long partnerId) {
+        Delivery delivery = deliveryRepository.findById(deliveryId)
+                .orElseThrow(() -> new BusinessException("Delivery offer not found", HttpStatus.NOT_FOUND));
+
+        if (delivery.getStatus() != DeliveryStatus.SEARCHING) {
+            throw new BusinessException("Delivery already accepted by another partner", HttpStatus.CONFLICT);
+        }
+
+        User partner = userRepository.findById(partnerId)
+                .orElseThrow(() -> new BusinessException("Partner not found", HttpStatus.NOT_FOUND));
+
+        delivery.setPartnerId(partnerId);
+        delivery.setPartnerName(partner.getFullName());
+        delivery.setPartnerPhone(partner.getPhone());
+        delivery.setStatus(DeliveryStatus.ASSIGNED);
+        delivery.setAssignedAt(LocalDateTime.now());
+        delivery = deliveryRepository.save(delivery);
+
+        Order order = orderRepository.findById(delivery.getOrderId()).orElseThrow();
+        orderStateMachine.transition(order, OrderStatus.ASSIGNED, "DELIVERY", "Assigned to partner " + partner.getFullName());
+        orderRepository.save(order);
+
+        return delivery;
+    }
+
+    @Transactional
+    public Delivery pickupOrder(Long deliveryId, Long partnerId, String pickupCode) {
+        Delivery delivery = deliveryRepository.findById(deliveryId)
+                .orElseThrow(() -> new BusinessException("Delivery not found", HttpStatus.NOT_FOUND));
+
+        if (!delivery.getPickupCode().equalsIgnoreCase(pickupCode.trim())) {
+            throw new BusinessException("Invalid pickup code. Pharmacist verification failed.", HttpStatus.BAD_REQUEST);
+        }
+
+        delivery.setStatus(DeliveryStatus.PICKED_UP);
+        delivery.setPickedUpAt(LocalDateTime.now());
+        delivery = deliveryRepository.save(delivery);
+
+        Order order = orderRepository.findById(delivery.getOrderId()).orElseThrow();
+        orderStateMachine.transition(order, OrderStatus.PICKED_UP, "DELIVERY", "Picked up from pharmacy counter");
+        orderRepository.save(order);
+
+        return delivery;
+    }
+
+    @Transactional
+    public Delivery startJourney(Long deliveryId, Long partnerId) {
+        Delivery delivery = deliveryRepository.findById(deliveryId)
+                .orElseThrow(() -> new BusinessException("Delivery not found", HttpStatus.NOT_FOUND));
+
+        delivery.setStatus(DeliveryStatus.IN_TRANSIT);
+        delivery = deliveryRepository.save(delivery);
+
+        Order order = orderRepository.findById(delivery.getOrderId()).orElseThrow();
+        orderStateMachine.transition(order, OrderStatus.OUT_FOR_DELIVERY, "DELIVERY", "Partner is on the way. Delivery OTP generated.");
+        orderRepository.save(order);
+
+        return delivery;
+    }
+
+    @Transactional
+    public Delivery completeDelivery(Long deliveryId, Long partnerId, String deliveryOtp, boolean codCollected) {
+        Delivery delivery = deliveryRepository.findById(deliveryId)
+                .orElseThrow(() -> new BusinessException("Delivery not found", HttpStatus.NOT_FOUND));
+
+        if (!delivery.getDeliveryOtp().equals(deliveryOtp.trim())) {
+            throw new BusinessException("Invalid customer Delivery OTP", HttpStatus.BAD_REQUEST);
+        }
+
+        delivery.setStatus(DeliveryStatus.DELIVERED);
+        delivery.setDeliveredAt(LocalDateTime.now());
+        delivery.setCodCollected(codCollected);
+        delivery = deliveryRepository.save(delivery);
+
+        Order order = orderRepository.findById(delivery.getOrderId()).orElseThrow();
+        orderStateMachine.transition(order, OrderStatus.DELIVERED, "DELIVERY", "Delivered successfully with customer OTP verification");
+        orderRepository.save(order);
+
+        // Update Payment status if COD
+        if (codCollected) {
+            paymentRepository.findByOrderId(order.getId()).ifPresent(p -> {
+                p.setStatus(PaymentStatus.COD_COLLECTED);
+                p.setPaidAt(LocalDateTime.now());
+                paymentRepository.save(p);
+            });
+        }
+
+        return delivery;
+    }
+
+    @Transactional
+    public Delivery failDelivery(Long deliveryId, Long partnerId, String reason) {
+        Delivery delivery = deliveryRepository.findById(deliveryId)
+                .orElseThrow(() -> new BusinessException("Delivery not found", HttpStatus.NOT_FOUND));
+
+        delivery.setStatus(DeliveryStatus.FAILED);
+        delivery.setFailureReason(reason);
+        delivery = deliveryRepository.save(delivery);
+
+        Order order = orderRepository.findById(delivery.getOrderId()).orElseThrow();
+        orderStateMachine.transition(order, OrderStatus.DELIVERY_FAILED, "DELIVERY", "Delivery failed: " + reason);
+        orderRepository.save(order);
+
+        return delivery;
+    }
+
+    @Transactional(readOnly = true)
+    public Map<String, Object> getEarningsSummary(Long partnerId) {
+        List<Delivery> delivered = deliveryRepository.findByPartnerIdOrderByAssignedAtDesc(partnerId)
+                .stream().filter(d -> d.getStatus() == DeliveryStatus.DELIVERED).toList();
+
+        double totalEarnings = delivered.size() * 65.0; // ₹65 per delivery flat rate + incentive
+        double totalCod = delivered.stream().filter(Delivery::isCodCollected).mapToDouble(Delivery::getCodAmount).sum();
+
+        return Map.of(
+                "deliveriesCount", delivered.size(),
+                "totalEarnings", totalEarnings,
+                "codCollectedToSettle", totalCod
+        );
+    }
+}

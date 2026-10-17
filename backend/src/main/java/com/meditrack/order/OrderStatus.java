@@ -1,0 +1,18 @@
+package com.meditrack.order;
+
+public enum OrderStatus {
+    PLACED,
+    PAYMENT_FAILED,
+    PRESCRIPTION_PENDING,
+    REJECTED,
+    CONFIRMED,
+    PROCESSING,
+    READY_FOR_PICKUP,
+    ASSIGNED,
+    PICKED_UP,
+    OUT_FOR_DELIVERY,
+    DELIVERED,
+    DELIVERY_FAILED,
+    RETURNED_TO_STORE,
+    CANCELLED
+}

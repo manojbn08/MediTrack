@@ -1,0 +1,39 @@
+# Environment and secrets
+.env
+.env.local
+.env.*.local
+*.env
+
+# Java / Maven
+**/target/
+*.class
+*.jar
+*.war
+*.ear
+.mvn/
+hs_err_pid*
+
+# Node / Frontend
+**/node_modules/
+**/dist/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.eslintcache
+
+# File uploads & runtime data
+uploads/
+**/uploads/
+*.log
+
+# IDE & OS
+.idea/
+.vscode/
+*.iml
+*.sublime-workspace
+.DS_Store
+Thumbs.db
+
+# System generated / Antigravity logs
+.system_generated/
