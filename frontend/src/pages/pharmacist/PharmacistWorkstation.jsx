@@ -4,6 +4,7 @@ import { subscribeToTopic } from '../../api/websocket';
 import Button from '../../components/Button';
 import RxBadge from '../../components/RxBadge';
 import StatusChip from '../../components/StatusChip';
+import ConfirmModal from '../../components/ConfirmModal';
 import { 
   ClipboardCheck, 
   Package, 
@@ -45,6 +46,16 @@ export default function PharmacistWorkstation() {
   const [rejectReason, setRejectReason] = useState('');
   const [actionLoading, setActionLoading] = useState(false);
   const [feedbackMessage, setFeedbackMessage] = useState('');
+
+  const [confirmDialog, setConfirmDialog] = useState({
+    isOpen: false,
+    title: '',
+    message: '',
+    confirmText: 'Accept',
+    cancelText: 'Reject',
+    variant: 'primary',
+    onConfirm: null,
+  });
 
   // New batch form state
   const [newBatch, setNewBatch] = useState({
@@ -99,12 +110,24 @@ export default function PharmacistWorkstation() {
     };
   }, []);
 
-  const handleInspectReturn = async (returnId, decision) => {
+  const promptInspectReturn = (returnId, decision) => {
+    setConfirmDialog({
+      isOpen: true,
+      title: `Confirm Return Inspection: ${decision}`,
+      message: `Are you sure you want to mark Return #${returnId} as ${decision}? This will record regulatory verification and release appropriate refund or store credit.`,
+      confirmText: `Confirm ${decision}`,
+      cancelText: 'Cancel',
+      variant: decision === 'APPROVED' ? 'success' : 'danger',
+      onConfirm: () => executeInspectReturn(returnId, decision),
+    });
+  };
+
+  const executeInspectReturn = async (returnId, decision) => {
+    setConfirmDialog(prev => ({ ...prev, isOpen: false }));
     try {
-      const notes = prompt(`Enter inspection verification notes for ${decision}:`, 'Outer packaging and tamper seal verified by licensed pharmacist') || 'Pharmacist verified';
       await api.post(`/pharmacist/returns/${returnId}/inspect`, {
         decision,
-        notes
+        notes: `Inspected and ${decision.toLowerCase()} by Registered Pharmacist. Package seal and product condition verified.`
       });
       setFeedbackMessage(`Return #${returnId} marked as ${decision}.`);
       loadData();
@@ -127,7 +150,21 @@ export default function PharmacistWorkstation() {
     }
   };
 
-  const handleApproveRx = async () => {
+  const promptApproveRx = () => {
+    if (!selectedRx) return;
+    setConfirmDialog({
+      isOpen: true,
+      title: 'Approve Prescription Dispensing',
+      message: `Confirm clinical approval for Rx #${selectedRx.id} (Patient: ${selectedRx.patientName})? Doctor Registration: ${selectedRx.doctorRegNo || 'MCI-KA-1998-04218'} will be stamped on the dispensing record.`,
+      confirmText: 'Accept & Approve',
+      cancelText: 'Reject / Cancel',
+      variant: 'success',
+      onConfirm: executeApproveRx,
+    });
+  };
+
+  const executeApproveRx = async () => {
+    setConfirmDialog(prev => ({ ...prev, isOpen: false }));
     if (!selectedRx) return;
     setActionLoading(true);
     try {
@@ -165,7 +202,20 @@ export default function PharmacistWorkstation() {
     }
   };
 
-  const handleAcceptOrder = async (orderId) => {
+  const promptAcceptOrder = (orderId) => {
+    setConfirmDialog({
+      isOpen: true,
+      title: `Start Picking: Order #${orderId}`,
+      message: `Are you ready to initiate FEFO batch allocation and picking for Order #${orderId}?`,
+      confirmText: 'Accept & Start Picking',
+      cancelText: 'Cancel',
+      variant: 'primary',
+      onConfirm: () => executeAcceptOrder(orderId),
+    });
+  };
+
+  const executeAcceptOrder = async (orderId) => {
+    setConfirmDialog(prev => ({ ...prev, isOpen: false }));
     try {
       await api.post(`/pharmacist/orders/${orderId}/accept`);
       loadData();
@@ -174,7 +224,20 @@ export default function PharmacistWorkstation() {
     }
   };
 
-  const handleMarkReady = async (orderId) => {
+  const promptMarkReady = (orderId) => {
+    setConfirmDialog({
+      isOpen: true,
+      title: `Mark Ready for Courier Handover: Order #${orderId}`,
+      message: `Confirm that all medicines for Order #${orderId} have been picked and packed in tamper-evident packaging? A secure 6-character pickup code will be generated for delivery handover.`,
+      confirmText: 'Accept & Pack Parcel',
+      cancelText: 'Cancel',
+      variant: 'success',
+      onConfirm: () => executeMarkReady(orderId),
+    });
+  };
+
+  const executeMarkReady = async (orderId) => {
+    setConfirmDialog(prev => ({ ...prev, isOpen: false }));
     try {
       await api.post(`/pharmacist/orders/${orderId}/ready`);
       setFeedbackMessage('Order packed! Pickup code generated for courier.');
@@ -349,7 +412,7 @@ export default function PharmacistWorkstation() {
                       size="sm" 
                       variant="primary"
                       loading={actionLoading}
-                      onClick={handleApproveRx}
+                      onClick={promptApproveRx}
                     >
                       <Check className="w-3.5 h-3.5 mr-1" />
                       Approve Dispensing
@@ -445,13 +508,13 @@ export default function PharmacistWorkstation() {
                     </div>
 
                     {o.status === 'CONFIRMED' && (
-                      <Button size="sm" onClick={() => handleAcceptOrder(o.id)}>
+                      <Button size="sm" onClick={() => promptAcceptOrder(o.id)}>
                         Start Picking
                       </Button>
                     )}
 
                     {o.status === 'PROCESSING' && (
-                      <Button size="sm" variant="primary" onClick={() => handleMarkReady(o.id)}>
+                      <Button size="sm" variant="primary" onClick={() => promptMarkReady(o.id)}>
                         Pack & Ready for Pickup
                       </Button>
                     )}
@@ -528,13 +591,13 @@ export default function PharmacistWorkstation() {
                         {r.inspectionStatus === 'PENDING' ? (
                           <>
                             <button
-                              onClick={() => handleInspectReturn(r.id, 'APPROVED')}
+                              onClick={() => promptInspectReturn(r.id, 'APPROVED')}
                               className="px-2.5 py-1 bg-semantic-success text-white rounded text-xs font-medium hover:bg-emerald-700 shadow-sm"
                             >
                               Approve & Refund
                             </button>
                             <button
-                              onClick={() => handleInspectReturn(r.id, 'REJECTED')}
+                              onClick={() => promptInspectReturn(r.id, 'REJECTED')}
                               className="px-2.5 py-1 bg-white border border-semantic-danger text-semantic-danger rounded text-xs font-medium hover:bg-rose-50"
                             >
                               Reject
@@ -830,6 +893,18 @@ export default function PharmacistWorkstation() {
           </div>
         </div>
       )}
+
+      {/* Universal Action Confirmation Dialog */}
+      <ConfirmModal
+        isOpen={confirmDialog.isOpen}
+        title={confirmDialog.title}
+        message={confirmDialog.message}
+        confirmText={confirmDialog.confirmText}
+        cancelText={confirmDialog.cancelText}
+        variant={confirmDialog.variant}
+        onConfirm={confirmDialog.onConfirm}
+        onCancel={() => setConfirmDialog(prev => ({ ...prev, isOpen: false }))}
+      />
 
     </div>
   );

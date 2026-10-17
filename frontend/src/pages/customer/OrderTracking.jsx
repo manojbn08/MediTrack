@@ -5,6 +5,7 @@ import { subscribeToTopic } from '../../api/websocket';
 import StatusChip from '../../components/StatusChip';
 import TrackingMap from '../../components/TrackingMap';
 import Button from '../../components/Button';
+import ConfirmModal from '../../components/ConfirmModal';
 import { 
   ArrowLeft, 
   Key, 
@@ -31,6 +32,16 @@ export default function OrderTracking() {
   const [returnReason, setReturnReason] = useState('');
   const [returnSubmitting, setReturnSubmitting] = useState(false);
   const [returnSuccessMsg, setReturnSuccessMsg] = useState('');
+
+  const [confirmDialog, setConfirmDialog] = useState({
+    isOpen: false,
+    title: '',
+    message: '',
+    confirmText: 'Accept',
+    cancelText: 'Reject',
+    variant: 'primary',
+    onConfirm: null,
+  });
 
   useEffect(() => {
     const fetchOrderAndDelivery = async () => {
@@ -154,9 +165,46 @@ export default function OrderTracking() {
     }
   };
 
-  const handleRequestReturn = async (e) => {
+  const promptCancelOrder = () => {
+    setConfirmDialog({
+      isOpen: true,
+      title: `Cancel Order: ${order.orderNumber}`,
+      message: `Are you sure you want to cancel this order? Any reserved medicine batch inventory will be released back to pharmacy stock.`,
+      confirmText: 'Yes, Cancel Order',
+      cancelText: 'Keep Order',
+      variant: 'danger',
+      onConfirm: executeCancelOrder,
+    });
+  };
+
+  const executeCancelOrder = async () => {
+    setConfirmDialog(prev => ({ ...prev, isOpen: false }));
+    try {
+      await api.post(`/customer/orders/${id}/cancel`, { reason: 'Customer requested cancellation' });
+      const orderRes = await api.get(`/customer/orders/${id}`);
+      setOrder(orderRes.data);
+      setReturnSuccessMsg('Order has been successfully cancelled.');
+    } catch (err) {
+      alert(err.response?.data?.message || err.message || 'Failed to cancel order');
+    }
+  };
+
+  const promptSubmitReturn = (e) => {
     e.preventDefault();
     if (!returnReason.trim()) return;
+    setConfirmDialog({
+      isOpen: true,
+      title: `Submit Return Request: Order ${order.orderNumber}`,
+      message: `Confirm submitting return request for reason: "${returnReason}"? In compliance with CDSCO guidelines, unbroken tamper seal must be verified by a pharmacist before refund is processed.`,
+      confirmText: 'Confirm & Submit',
+      cancelText: 'Cancel',
+      variant: 'primary',
+      onConfirm: executeRequestReturn,
+    });
+  };
+
+  const executeRequestReturn = async () => {
+    setConfirmDialog(prev => ({ ...prev, isOpen: false }));
     setReturnSubmitting(true);
     try {
       await api.post(`/customer/orders/${id}/returns`, {
@@ -182,6 +230,15 @@ export default function OrderTracking() {
         </Link>
 
         <div className="flex items-center gap-2">
+          {(order.status === 'PLACED' || order.status === 'PRESCRIPTION_PENDING' || order.status === 'CONFIRMED') && (
+            <button
+              onClick={promptCancelOrder}
+              className="text-xs font-medium px-3 py-1.5 rounded-control border border-red-200 text-semantic-danger hover:bg-red-50 inline-flex items-center gap-1.5 shadow-sm"
+            >
+              Cancel Order
+            </button>
+          )}
+
           {order.status === 'DELIVERED' && (
             <button
               onClick={() => setShowReturnModal(true)}
@@ -442,7 +499,7 @@ export default function OrderTracking() {
               <Button 
                 size="sm" 
                 disabled={!returnReason || returnSubmitting}
-                onClick={handleRequestReturn}
+                onClick={promptSubmitReturn}
               >
                 {returnSubmitting ? 'Submitting...' : 'Confirm Return Request'}
               </Button>
@@ -450,6 +507,18 @@ export default function OrderTracking() {
           </div>
         </div>
       )}
+
+      {/* Action Confirmation Dialog */}
+      <ConfirmModal
+        isOpen={confirmDialog.isOpen}
+        title={confirmDialog.title}
+        message={confirmDialog.message}
+        confirmText={confirmDialog.confirmText}
+        cancelText={confirmDialog.cancelText}
+        variant={confirmDialog.variant}
+        onConfirm={confirmDialog.onConfirm}
+        onCancel={() => setConfirmDialog(prev => ({ ...prev, isOpen: false }))}
+      />
 
     </div>
   );

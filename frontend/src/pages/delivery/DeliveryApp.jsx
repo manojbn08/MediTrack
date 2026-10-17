@@ -3,6 +3,7 @@ import api from '../../api/client';
 import { subscribeToTopic } from '../../api/websocket';
 import Button from '../../components/Button';
 import TrackingMap from '../../components/TrackingMap';
+import ConfirmModal from '../../components/ConfirmModal';
 import { 
   Truck, 
   MapPin, 
@@ -13,20 +14,76 @@ import {
   Key, 
   DollarSign, 
   Power,
-  Radio
+  Radio,
+  Store,
+  Compass
 } from 'lucide-react';
+
+function calculateHaversine(lat1, lon1, lat2, lon2) {
+  if (!lat1 || !lon1 || !lat2 || !lon2) return 0;
+  const R = 6371; // km
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+            Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+            Math.sin(dLon/2) * Math.sin(dLon/2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  return Math.round(R * c * 10) / 10;
+}
 
 export default function DeliveryApp() {
   const [online, setOnline] = useState(true);
   const [offers, setOffers] = useState([]);
   const [activeDelivery, setActiveDelivery] = useState(null);
   const [riderPos, setRiderPos] = useState([12.9510, 77.6365]);
+  const [geoState, setGeoState] = useState({ active: false, loading: false, msg: '' });
+  
   const [pickupCodeInput, setPickupCodeInput] = useState('');
   const [deliveryOtpInput, setDeliveryOtpInput] = useState('');
   const [codCollected, setCodCollected] = useState(false);
   const [earnings, setEarnings] = useState({ deliveriesCount: 0, totalEarnings: 0, codCollectedToSettle: 0 });
   const [error, setError] = useState('');
   const [actionSuccess, setActionSuccess] = useState('');
+
+  // Confirmation modal state
+  const [confirmDialog, setConfirmDialog] = useState({
+    isOpen: false,
+    title: '',
+    message: '',
+    confirmText: 'Accept',
+    cancelText: 'Reject',
+    variant: 'primary',
+    onConfirm: null,
+  });
+
+  const requestLiveLocation = () => {
+    if (!navigator.geolocation) {
+      setGeoState({ active: false, loading: false, msg: 'Geolocation not supported by device.' });
+      return;
+    }
+    setGeoState({ active: false, loading: true, msg: 'Requesting device GPS permission...' });
+
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const lat = Math.round(pos.coords.latitude * 10000) / 10000;
+        const lng = Math.round(pos.coords.longitude * 10000) / 10000;
+        setRiderPos([lat, lng]);
+        setGeoState({
+          active: true,
+          loading: false,
+          msg: `Live Location Active: (${lat.toFixed(4)}, ${lng.toFixed(4)})`
+        });
+      },
+      (err) => {
+        setGeoState({
+          active: false,
+          loading: false,
+          msg: 'Location permission denied. Please enable GPS for real-time proximity calculation.'
+        });
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+    );
+  };
 
   const loadData = async () => {
     try {
@@ -39,7 +96,6 @@ export default function DeliveryApp() {
       setOffers(offersRes.data || []);
       setEarnings(earningsRes.data || { deliveriesCount: 0, totalEarnings: 0, codCollectedToSettle: 0 });
 
-      // Find if there is an ongoing active delivery for this partner
       const inProgress = (historyRes.data || []).find(
         d => d.status === 'ASSIGNED' || d.status === 'PICKED_UP' || d.status === 'IN_TRANSIT'
       );
@@ -54,6 +110,7 @@ export default function DeliveryApp() {
 
   useEffect(() => {
     loadData();
+    requestLiveLocation();
 
     // Listen to real-time available pickup broadcasts
     const unsubPickups = subscribeToTopic('/topic/delivery/available-pickups', (msg) => {
@@ -71,7 +128,6 @@ export default function DeliveryApp() {
     try {
       const destLat = activeDelivery.deliveryLat || 12.9304;
       const destLng = activeDelivery.deliveryLng || 77.6784;
-      // Interpolate rider closer to destination
       const nextLat = Math.round(((riderPos[0] + destLat) / 2) * 10000) / 10000;
       const nextLng = Math.round(((riderPos[1] + destLng) / 2) * 10000) / 10000;
       setRiderPos([nextLat, nextLng]);
@@ -86,7 +142,24 @@ export default function DeliveryApp() {
     }
   };
 
-  const handleAcceptOffer = async (deliveryId) => {
+  // 1. Accept Offer with Confirmation Dialog
+  const promptAcceptOffer = (offer) => {
+    const distToPickup = calculateHaversine(riderPos[0], riderPos[1], offer.pickupLat || 12.9716, offer.pickupLng || 77.5946);
+    const distToDrop = calculateHaversine(riderPos[0], riderPos[1], offer.deliveryLat || 12.9304, offer.deliveryLng || 77.6784);
+    
+    setConfirmDialog({
+      isOpen: true,
+      title: `Accept Delivery Job: Order #${offer.orderId}`,
+      message: `Review job details before accepting:\n• Pharmacy Pickup: ${offer.pickupAddress || 'MediTrack Central Pharmacy, MG Road'} (${distToPickup} km from your current location)\n• Customer Destination: ${offer.deliveryAddress || 'Customer Address'} (${distToDrop} km from your current location)\n• Compensation: ₹65.00${offer.codAmount > 0 ? ` + Collect ₹${offer.codAmount.toFixed(2)} COD` : ''}`,
+      confirmText: 'Accept Delivery Job',
+      cancelText: 'Reject / Decline',
+      variant: 'primary',
+      onConfirm: () => executeAcceptOffer(offer.id),
+    });
+  };
+
+  const executeAcceptOffer = async (deliveryId) => {
+    setConfirmDialog(prev => ({ ...prev, isOpen: false }));
     setError('');
     setActionSuccess('');
     try {
@@ -99,11 +172,26 @@ export default function DeliveryApp() {
     }
   };
 
-  const handleVerifyPickup = async () => {
+  // 2. Verify Pickup with Confirmation Dialog
+  const promptVerifyPickup = () => {
     if (!pickupCodeInput.trim()) {
-      setError('Please enter the 6-character pickup code displayed on the parcel.');
+      setError('Please enter the 6-character pickup code displayed by the pharmacist.');
       return;
     }
+    setError('');
+    setConfirmDialog({
+      isOpen: true,
+      title: 'Confirm Counter Pickup Handover',
+      message: `Confirm that you have physically inspected Order #${activeDelivery.orderId} and matched Pickup Code: "${pickupCodeInput.trim().toUpperCase()}" at the pharmacy counter?`,
+      confirmText: 'Confirm Handover',
+      cancelText: 'Cancel',
+      variant: 'success',
+      onConfirm: executeVerifyPickup,
+    });
+  };
+
+  const executeVerifyPickup = async () => {
+    setConfirmDialog(prev => ({ ...prev, isOpen: false }));
     setError('');
     setActionSuccess('');
     try {
@@ -119,7 +207,21 @@ export default function DeliveryApp() {
     }
   };
 
-  const handleStartJourney = async () => {
+  // 3. Start Journey with Confirmation Dialog
+  const promptStartJourney = () => {
+    setConfirmDialog({
+      isOpen: true,
+      title: 'Start Delivery Route',
+      message: `Are you ready to depart for Order #${activeDelivery.orderId}? Customer will be notified and sent their 4-digit verification OTP.`,
+      confirmText: 'Start Route',
+      cancelText: 'Cancel',
+      variant: 'primary',
+      onConfirm: executeStartJourney,
+    });
+  };
+
+  const executeStartJourney = async () => {
+    setConfirmDialog(prev => ({ ...prev, isOpen: false }));
     setError('');
     setActionSuccess('');
     try {
@@ -132,11 +234,26 @@ export default function DeliveryApp() {
     }
   };
 
-  const handleCompleteDelivery = async () => {
+  // 4. Complete Delivery with Confirmation Dialog
+  const promptCompleteDelivery = () => {
     if (!deliveryOtpInput.trim()) {
       setError('Ask customer for their 4-digit Delivery OTP before handing over medicines.');
       return;
     }
+    setError('');
+    setConfirmDialog({
+      isOpen: true,
+      title: 'Complete Delivery Verification',
+      message: `Confirm that OTP "${deliveryOtpInput.trim()}" was provided by the customer and tamper-sealed medicines for Order #${activeDelivery.orderId} have been delivered?${activeDelivery.codAmount > 0 ? `\n• Cash Collected: ₹${activeDelivery.codAmount.toFixed(2)}` : ''}`,
+      confirmText: 'Complete Delivery',
+      cancelText: 'Cancel',
+      variant: 'success',
+      onConfirm: executeCompleteDelivery,
+    });
+  };
+
+  const executeCompleteDelivery = async () => {
+    setConfirmDialog(prev => ({ ...prev, isOpen: false }));
     setError('');
     setActionSuccess('');
     try {
@@ -158,7 +275,7 @@ export default function DeliveryApp() {
     <div className="max-w-md mx-auto px-4 py-6 space-y-5 pb-24">
       
       {/* Top Mobile Status Header */}
-      <div className="bg-white rounded-panel border border-neutral-200 p-4 flex items-center justify-between shadow-sm">
+      <div className="bg-white rounded-panel border border-neutral-200 p-4 flex items-center justify-between shadow-xs">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-full bg-brand-tint text-brand flex items-center justify-center">
             <Truck className="w-5 h-5 stroke-[1.8]" />
@@ -180,6 +297,23 @@ export default function DeliveryApp() {
         >
           <Power className="w-3.5 h-3.5" />
           <span>{online ? 'Online' : 'Offline'}</span>
+        </button>
+      </div>
+
+      {/* GPS Location Permission & Status Bar */}
+      <div className="p-3 bg-white rounded-panel border border-neutral-200 shadow-xs flex items-center justify-between gap-2 text-xs">
+        <div className="flex items-center gap-2">
+          <Compass className={`w-4 h-4 ${geoState.active ? 'text-semantic-success animate-spin' : 'text-neutral-400'}`} />
+          <span className="text-neutral-700 font-medium">
+            {geoState.loading ? 'Requesting GPS...' : geoState.active ? geoState.msg : 'GPS Inactive'}
+          </span>
+        </div>
+        <button
+          type="button"
+          onClick={requestLiveLocation}
+          className="text-xs px-2.5 py-1 bg-neutral-100 hover:bg-neutral-200 text-neutral-800 font-semibold rounded-control border border-neutral-300 transition-colors"
+        >
+          📍 Update GPS
         </button>
       </div>
 
@@ -219,20 +353,28 @@ export default function DeliveryApp() {
           {/* Interactive Route Map */}
           <div className="h-56 rounded-control overflow-hidden border border-neutral-300">
             <TrackingMap 
-              pharmacyPos={[12.9716, 77.5946]}
+              pharmacyPos={[activeDelivery.pickupLat || 12.9716, activeDelivery.pickupLng || 77.5946]}
               customerPos={[activeDelivery.deliveryLat || 12.9304, activeDelivery.deliveryLng || 77.6784]}
               riderPos={riderPos}
               status={activeDelivery.status}
             />
           </div>
 
-          {/* Destination Details */}
-          <div className="p-3 bg-neutral-50 rounded-control border border-neutral-200 text-xs space-y-1.5">
+          {/* Destination Details from DB */}
+          <div className="p-3 bg-neutral-50 rounded-control border border-neutral-200 text-xs space-y-2">
             <div className="flex items-start gap-2">
+              <Store className="w-4 h-4 text-emerald-700 shrink-0 mt-0.5" />
+              <div>
+                <strong>Pharmacy Pickup:</strong>
+                <div className="text-neutral-700">{activeDelivery.pickupAddress || 'MediTrack Central Pharmacy Hub, Brigade Rd, Bengaluru'}</div>
+              </div>
+            </div>
+
+            <div className="flex items-start gap-2 pt-1 border-t border-neutral-200/60">
               <MapPin className="w-4 h-4 text-brand shrink-0 mt-0.5" />
               <div>
-                <strong>Destination Address:</strong>
-                <div className="text-neutral-700">{activeDelivery.deliveryAddressSnapshot || 'Customer Address, Bengaluru'}</div>
+                <strong>Customer Destination:</strong>
+                <div className="text-neutral-700">{activeDelivery.deliveryAddress || activeDelivery.deliveryAddressSnapshot || 'Customer Address, Bengaluru'}</div>
               </div>
             </div>
 
@@ -258,7 +400,7 @@ export default function DeliveryApp() {
                   onChange={(e) => setPickupCodeInput(e.target.value)}
                   className="flex-1 px-3 h-11 text-sm uppercase font-mono-numbers bg-white border border-neutral-300 rounded-control focus:border-brand"
                 />
-                <Button size="lg" onClick={handleVerifyPickup} className="h-11 px-5">
+                <Button size="lg" onClick={promptVerifyPickup} className="h-11 px-5">
                   Verify Pickup
                 </Button>
               </div>
@@ -274,7 +416,7 @@ export default function DeliveryApp() {
               <p className="text-xs text-neutral-600">
                 Package in hand. Start ride to trigger live tracking and dispatch OTP to customer.
               </p>
-              <Button size="lg" className="w-full h-12 text-base font-semibold" onClick={handleStartJourney}>
+              <Button size="lg" className="w-full h-12 text-base font-semibold" onClick={promptStartJourney}>
                 <Navigation className="w-5 h-5 mr-1" />
                 Start Delivery Route
               </Button>
@@ -329,7 +471,7 @@ export default function DeliveryApp() {
                 </label>
               )}
 
-              <Button size="lg" className="w-full h-12 text-base font-semibold" onClick={handleCompleteDelivery}>
+              <Button size="lg" className="w-full h-12 text-base font-semibold" onClick={promptCompleteDelivery}>
                 <CheckCircle2 className="w-5 h-5 mr-1" />
                 Confirm & Complete Delivery
               </Button>
@@ -338,7 +480,7 @@ export default function DeliveryApp() {
 
         </div>
       ) : (
-        /* AVAILABLE OFFERS LIST */
+        /* AVAILABLE OFFERS LIST - COMPLETE WITH LIVE LOCATION DISTANCE CHECKS */
         <div className="space-y-3">
           <div className="flex items-center justify-between text-xs text-neutral-600 px-1">
             <span className="font-semibold uppercase tracking-wide">Available Nearby Jobs</span>
@@ -354,50 +496,91 @@ export default function DeliveryApp() {
               No orders waiting for pickup right now. New ready orders appear here automatically.
             </div>
           ) : (
-            offers.map((offer) => (
-              <div 
-                key={offer.id}
-                className="bg-white rounded-panel border border-neutral-200 p-4 space-y-3 hover:border-brand transition-colors shadow-sm"
-              >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className="font-semibold text-sm text-neutral-900 font-mono-numbers">
-                      Order #{offer.orderId}
-                    </span>
-                    <span className="px-2 py-0.5 rounded-full bg-brand-tint text-brand text-[10px] font-semibold font-mono-numbers">
-                      ~{offer.distanceKm} km
-                    </span>
+            offers.map((offer) => {
+              const pickupLat = offer.pickupLat || 12.9716;
+              const pickupLng = offer.pickupLng || 77.5946;
+              const dropLat = offer.deliveryLat || 12.9304;
+              const dropLng = offer.deliveryLng || 77.6784;
+
+              // Distance from partner's live position to pharmacy
+              const distToPickup = calculateHaversine(riderPos[0], riderPos[1], pickupLat, pickupLng);
+              // Distance from partner's live position to delivery drop
+              const distToDrop = calculateHaversine(riderPos[0], riderPos[1], dropLat, dropLng);
+              // Distance between pharmacy and drop
+              const distRoute = calculateHaversine(pickupLat, pickupLng, dropLat, dropLng);
+
+              return (
+                <div 
+                  key={offer.id}
+                  className="bg-white rounded-panel border border-neutral-200 p-4 space-y-3 hover:border-brand transition-colors shadow-xs"
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="font-semibold text-sm text-neutral-900 font-mono-numbers">
+                        Order #{offer.orderId}
+                      </span>
+                      <span className="px-2 py-0.5 rounded-full bg-brand-tint text-brand text-[10px] font-semibold font-mono-numbers">
+                        ~{distRoute} km route
+                      </span>
+                    </div>
+
+                    <strong className="text-base text-brand font-mono-numbers">
+                      ₹65.00
+                    </strong>
                   </div>
 
-                  <strong className="text-base text-brand font-mono-numbers">
-                    ₹65.00
-                  </strong>
-                </div>
-
-                <div className="text-xs text-neutral-600 space-y-1">
-                  <div><strong>Pickup:</strong> Central Pharmacy (Brigade Rd)</div>
-                  <div><strong>Drop:</strong> Indiranagar / Bellandur Destination</div>
-                  {offer.codAmount > 0 && (
-                    <div className="text-amber-800 font-semibold font-mono-numbers text-[11px]">
-                      COD to Collect: ₹{offer.codAmount.toFixed(2)}
+                  {/* Proximity breakdown from Delivery Partner's Live Location */}
+                  <div className="p-2.5 bg-neutral-50 rounded-control border border-neutral-200/80 text-xs space-y-2">
+                    <div>
+                      <div className="flex items-center justify-between">
+                        <span className="font-semibold text-emerald-800 flex items-center gap-1">
+                          <Store className="w-3.5 h-3.5" /> 1. Pharmacy Pickup:
+                        </span>
+                        <span className="font-mono-numbers text-[11px] font-bold text-emerald-700 bg-emerald-100/70 px-1.5 py-0.2 rounded">
+                          {distToPickup} km from your location
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-neutral-600 pl-4 mt-0.5">
+                        {offer.pickupAddress || 'MediTrack Central Pharmacy Hub, Brigade Rd, Bengaluru'}
+                      </p>
                     </div>
-                  )}
-                </div>
 
-                <Button 
-                  className="w-full h-11 text-sm font-semibold"
-                  onClick={() => handleAcceptOffer(offer.id)}
-                >
-                  Accept Delivery Job
-                </Button>
-              </div>
-            ))
+                    <div className="pt-1.5 border-t border-neutral-200/60">
+                      <div className="flex items-center justify-between">
+                        <span className="font-semibold text-brand flex items-center gap-1">
+                          <MapPin className="w-3.5 h-3.5" /> 2. Customer Delivery:
+                        </span>
+                        <span className="font-mono-numbers text-[11px] font-bold text-brand bg-brand-tint px-1.5 py-0.2 rounded">
+                          {distToDrop} km from your location
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-neutral-600 pl-4 mt-0.5">
+                        {offer.deliveryAddress || 'Customer Destination Address, Bengaluru'}
+                      </p>
+                    </div>
+
+                    {offer.codAmount > 0 && (
+                      <div className="text-amber-800 font-semibold font-mono-numbers text-[11px] pt-1 border-t border-neutral-200/60">
+                        COD to Collect: ₹{offer.codAmount.toFixed(2)}
+                      </div>
+                    )}
+                  </div>
+
+                  <Button 
+                    className="w-full h-11 text-sm font-semibold"
+                    onClick={() => promptAcceptOffer(offer)}
+                  >
+                    Accept Delivery Job
+                  </Button>
+                </div>
+              );
+            })
           )}
         </div>
       )}
 
       {/* Daily Earnings Card */}
-      <div className="bg-white rounded-panel border border-neutral-200 p-4 shadow-sm text-xs space-y-2">
+      <div className="bg-white rounded-panel border border-neutral-200 p-4 shadow-xs text-xs space-y-2">
         <h3 className="font-semibold text-neutral-900 flex items-center gap-1.5">
           <DollarSign className="w-4 h-4 text-brand" /> Today's Delivery Summary
         </h3>
@@ -416,6 +599,18 @@ export default function DeliveryApp() {
           </div>
         </div>
       </div>
+
+      {/* Universal Action Confirmation Dialog (Accept or Reject for every action) */}
+      <ConfirmModal
+        isOpen={confirmDialog.isOpen}
+        title={confirmDialog.title}
+        message={confirmDialog.message}
+        confirmText={confirmDialog.confirmText}
+        cancelText={confirmDialog.cancelText}
+        variant={confirmDialog.variant}
+        onConfirm={confirmDialog.onConfirm}
+        onCancel={() => setConfirmDialog(prev => ({ ...prev, isOpen: false }))}
+      />
 
     </div>
   );

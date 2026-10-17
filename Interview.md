@@ -155,37 +155,51 @@ $$c = 2 \cdot \text{atan2}(\sqrt{a}, \sqrt{1-a}), \quad d = R \cdot c$$
 
 Follow this exact walkthrough during your presentation:
 
-### Step 1: Role Gateway & Access Enforcement
+### Step 1: Clean Unified Login & Role-Respected Navigation
 1. Open `http://localhost:5173`.
-2. Show the **Role Selection Gateway**: 4 distinct roles.
-3. Click **System Administrator** -> Click *Register* -> Observe automatic redirect to `/login?role=admin` (Demonstrating admin public registration lockout).
-4. Click **Customer** -> Click *Register as Customer* -> Fill name, email, phone, password -> Click Submit -> Observe 6-digit OTP verification screen.
+2. Notice the clean header: on auth pages (`/login`), neither Catalog nor Cart nor role switchers appear—preserving strict security boundaries.
+3. Observe the login form: enter standard credentials (e.g. `customer@meditrack.com` / `Password@123`).
+4. Upon clicking **Sign In**, the backend validates credentials, extracts `ROLE_CUSTOMER`, and routes directly to the Customer workspace.
+5. Notice the navigation tabs: **only role-respected links are rendered** (Customer sees *Medicines Catalog*, *My Orders*, *Prescriptions*, and *Cart*; Pharmacists, Delivery Partners, and Admins never see the Cart or Catalog).
+6. Click **Sign Out**: observe the **Universal Confirmation Dialog** asking to confirm sign out; upon confirmation, the application immediately redirects back to `/login`.
 
-### Step 2: Customer Ordering with OTC vs. Rx Rules
+### Step 2: Customer Ordering with Live Location & Geofence
 1. Log in as Customer: `customer@meditrack.com` / `Password@123`.
 2. Add **Dolo 650** (OTC) to cart -> Go to `/checkout`.
-3. Observe the green banner: *"Pure Over-The-Counter (OTC) Order: No prescription required"*.
-4. On the Leaflet map: Drag the pin around Bengaluru metro -> Observe dynamic distance update in km and geofence check (<= 15 km).
-5. Place Order -> System redirects to `/customer/orders/:id/track`.
+3. Notice the green OTC banner: *"Pure Over-The-Counter (OTC) Order: No prescription required"*.
+4. Click **📍 Detect My Live Location**:
+   - The browser prompts: *"MediTrack wants to know your location"*.
+   - When granted, the map automatically centers on your exact GPS coordinates, updates the delivery pin, calculates the real Haversine distance from the Central Pharmacy hub, and verifies the 15.0 km geofence.
+5. Click **Confirm & Place Order**:
+   - Observe the **Confirmation Dialog** showing the exact total amount, payment method, and destination distance.
+   - Click **Accept & Place Order** -> System reserves batch stock and redirects to `/customer/orders/:id/track`.
 
 ### Step 3: Pharmacist Prescription Audit & Picking
 1. Log in as Pharmacist: `pharmacist@meditrack.com` / `Password@123`.
-2. Navigate to **Pharmacist Station** -> View pending Rx queue.
-3. View **Fulfillment Orders** tab -> Click *Start Picking* -> Click *Pack & Ready for Pickup*.
-4. System allocates earliest expiring FEFO batch and displays 6-character Pickup Code (e.g. `PK-7741`).
-5. Click **[Substitutes]** button on any medicine -> Show instant generic bio-equivalent dialog with cheaper salt matches.
+2. Notice the header: strictly shows *Pharmacist Station* (no consumer Cart or Catalog).
+3. View **Fulfillment Orders** tab:
+   - Click *Start Picking* -> Confirmation Dialog pops up asking to confirm FEFO batch allocation -> Click *Accept*.
+   - Click *Pack & Ready for Pickup* -> Confirmation Dialog asks to verify safety seals -> Click *Accept*.
+4. System allocates earliest expiring FEFO batch and generates the 6-character Pickup Code (e.g. `PK-8812`).
+5. Click **[Substitutes]** on any item to view CDSCO-approved generic bio-equivalents.
 
-### Step 4: Courier Pickup, Live GPS Transceiver & Customer OTP
+### Step 4: Courier Live Proximity Check & Physical Handover
 1. Log in as Delivery Partner: `delivery@meditrack.com` / `Password@123`.
-2. View **Available Nearby Jobs** -> Click *Accept Delivery*.
-3. At the counter: enter the Pharmacist's pickup code -> Click *Verify Pickup*.
-4. Click *Start Delivery Route* -> Order transitions to `IN_TRANSIT`.
-5. Click *📡 Stream Current GPS Position to Customer* -> Live coordinates and Haversine ETA update in real time.
-6. Switch to Customer tracking tab -> Observe courier motorcycle marker moving live on OpenStreetMap with updated ETA.
-7. Enter Customer's 4-digit OTP into driver app -> Click *Confirm & Complete Delivery*.
+2. The browser prompts for device location permission to establish live rider GPS coordinates.
+3. In **Available Nearby Jobs**, inspect the job details:
+   - **Distance 1:** Rider's live location to Central Pharmacy pickup counter (calculated via Haversine).
+   - **Distance 2:** Rider's live location to customer delivery address.
+   - All addresses and coordinates are read directly from the database (no hardcoded data).
+4. Click *Accept Delivery Job* -> Confirmation Dialog pops up displaying pickup & drop distances -> Click *Accept*.
+5. At the counter: enter the Pharmacist's pickup code -> Confirmation Dialog -> Order transitions to `PICKED_UP`.
+6. Click *Start Delivery Route* -> Confirmation Dialog -> Order transitions to `IN_TRANSIT` and customer receives 4-digit OTP.
+7. Click *📡 Stream Current GPS Position to Customer* -> Live coordinates stream via WebSocket.
+8. Doorstep delivery: enter customer's 4-digit OTP -> Confirmation Dialog -> Delivery completed!
 
 ### Step 5: Reverse Logistics & GST Tax Invoice
-1. In Customer tracking screen: Click **GST Invoice PDF** -> Instant download of legal GST invoice generated via OpenPDF.
-2. Click **Request Return** -> Select reason (e.g. "Physician modified dosage") -> Submit.
-3. Switch to Pharmacist station -> Open **Returns Inspection** tab -> Inspect condition -> Click *Approve & Refund*.
-4. Switch to Admin portal (`admin@meditrack.com` / `Password@123`) -> View **Regulatory Audit Logs** -> Show immutable trail of the return approval, order lifecycle, and user activations.
+1. Customer tracking screen: Click **GST Invoice PDF** to download the OpenPDF-generated tax invoice.
+2. Click **Request Return** -> Select reason -> Confirmation Dialog -> Submitted for pharmacist review.
+3. Switch to Pharmacist station -> Open **Returns Inspection** tab -> Click *Approve & Refund* -> Confirmation Dialog records compliance inspection.
+4. Switch to Admin portal (`admin@meditrack.com` / `Password@123`):
+   - Review pending approvals: click *Approve* or *Reject* -> Confirmation Dialog validates administrative action.
+   - View **Regulatory Audit Logs** for an immutable audit trail.

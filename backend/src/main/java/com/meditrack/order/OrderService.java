@@ -285,10 +285,23 @@ public class OrderService {
             Delivery d = new Delivery();
             d.setOrderId(savedOrder.getId());
             d.setStatus(DeliveryStatus.SEARCHING);
+            d.setPickupAddress("MediTrack Central Pharmacy Hub, Brigade Rd, Bengaluru");
+            d.setDeliveryAddress(savedOrder.getDeliveryAddressSnapshot());
             d.setPickupLat(12.9716);
             d.setPickupLng(77.5946);
             d.setDeliveryLat(savedOrder.getDeliveryLat());
             d.setDeliveryLng(savedOrder.getDeliveryLng());
+            
+            double dLat = Math.toRadians(savedOrder.getDeliveryLat() - 12.9716);
+            double dLon = Math.toRadians(savedOrder.getDeliveryLng() - 77.5946);
+            double a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+                    Math.cos(Math.toRadians(12.9716)) * Math.cos(Math.toRadians(savedOrder.getDeliveryLat())) *
+                    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+            double c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+            double distKm = Math.max(0.5, Math.round(6371.0 * c * 10.0) / 10.0);
+            d.setDistanceKm(distKm);
+            d.setEtaMinutes((int) Math.max(10.0, Math.round(5.0 + (distKm / 20.0) * 60.0)));
+
             d.setPickupCode(savedOrder.getPickupCode());
             d.setDeliveryOtp(savedOrder.getDeliveryOtp());
             d.setCodAmount(savedOrder.getPaymentMethod() == PaymentMethod.COD ? savedOrder.getTotalAmount() : 0.0);

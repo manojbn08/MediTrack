@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import api from '../../api/client';
 import Button from '../../components/Button';
 import StatusChip from '../../components/StatusChip';
+import ConfirmModal from '../../components/ConfirmModal';
 import { 
   ShieldAlert, 
   Users, 
@@ -58,8 +59,32 @@ export default function AdminPortal() {
     loadData();
   }, []);
 
-  const handleToggleUserStatus = async (user) => {
-    const nextStatus = user.status === 'ACTIVE' ? 'BLOCKED' : 'ACTIVE';
+  const [confirmDialog, setConfirmDialog] = useState({
+    isOpen: false,
+    title: '',
+    message: '',
+    confirmText: 'Accept',
+    cancelText: 'Reject',
+    variant: 'primary',
+    onConfirm: null,
+  });
+
+  const promptToggleUserStatus = (u) => {
+    const nextStatus = u.status === 'ACTIVE' ? 'BLOCKED' : 'ACTIVE';
+    const isSuspending = u.status === 'ACTIVE';
+    setConfirmDialog({
+      isOpen: true,
+      title: isSuspending ? 'Suspend User Access' : 'Reactivate User Account',
+      message: `Are you sure you want to ${isSuspending ? 'suspend' : 'reactivate'} ${u.fullName} (${u.email})? ${isSuspending ? 'They will be immediately locked out and forbidden from accessing the portal.' : 'They will regain access to their portal.'}`,
+      confirmText: isSuspending ? 'Confirm Suspension' : 'Confirm Reactivation',
+      cancelText: 'Cancel',
+      variant: isSuspending ? 'danger' : 'success',
+      onConfirm: () => executeToggleUserStatus(u, nextStatus),
+    });
+  };
+
+  const executeToggleUserStatus = async (user, nextStatus) => {
+    setConfirmDialog(prev => ({ ...prev, isOpen: false }));
     try {
       await api.put(`/admin/users/${user.id}/status`, { status: nextStatus });
       setNotification(`User ${user.fullName} is now ${nextStatus}.`);
@@ -69,13 +94,37 @@ export default function AdminPortal() {
     }
   };
 
-  const handleApprovalAction = async (userId, action) => {
+  const promptApprovalAction = (partner, action) => {
+    if (action === 'approve') {
+      setConfirmDialog({
+        isOpen: true,
+        title: `Approve Credentials: ${partner.fullName}`,
+        message: `Confirm administrative verification and activation for ${partner.fullName} as ${partner.role}? The user's account will be enabled immediately and an activation notification dispatched.`,
+        confirmText: 'Accept & Activate',
+        cancelText: 'Cancel',
+        variant: 'success',
+        onConfirm: () => executeApprovalAction(partner.id, 'approve'),
+      });
+    } else {
+      setConfirmDialog({
+        isOpen: true,
+        title: `Reject Application: ${partner.fullName}`,
+        message: `Are you sure you want to reject the application for ${partner.fullName} (${partner.role})? Their account will remain rejected and cannot log in.`,
+        confirmText: 'Confirm Rejection',
+        cancelText: 'Cancel',
+        variant: 'danger',
+        onConfirm: () => executeApprovalAction(partner.id, 'reject', 'Credentials did not satisfy statutory standards'),
+      });
+    }
+  };
+
+  const executeApprovalAction = async (userId, action, reason = '') => {
+    setConfirmDialog(prev => ({ ...prev, isOpen: false }));
     try {
       if (action === 'approve') {
         await api.post(`/admin/approvals/${userId}/approve`);
         setNotification(`User #${userId} has been approved and notified.`);
       } else {
-        const reason = prompt('Enter rejection reason:', 'Credentials did not satisfy compliance standards') || 'Credentials incomplete';
         await api.post(`/admin/approvals/${userId}/reject`, { reason });
         setNotification(`User #${userId} application rejected.`);
       }
@@ -222,7 +271,7 @@ export default function AdminPortal() {
                     </td>
                     <td className="py-2.5 px-4 text-right">
                       <button
-                        onClick={() => handleToggleUserStatus(u)}
+                        onClick={() => promptToggleUserStatus(u)}
                         className="text-xs font-medium text-brand hover:underline"
                       >
                         {u.status === 'ACTIVE' ? 'Suspend' : 'Reactivate'}
@@ -317,13 +366,13 @@ export default function AdminPortal() {
                       </td>
                       <td className="py-3 px-4 text-right space-x-2">
                         <button
-                          onClick={() => handleApprovalAction(p.id, 'approve')}
+                          onClick={() => promptApprovalAction(p, 'approve')}
                           className="px-2.5 py-1 bg-semantic-success text-white rounded text-xs font-medium hover:bg-emerald-700 transition-colors shadow-sm"
                         >
                           Approve
                         </button>
                         <button
-                          onClick={() => handleApprovalAction(p.id, 'reject')}
+                          onClick={() => promptApprovalAction(p, 'reject')}
                           className="px-2.5 py-1 bg-white border border-semantic-danger text-semantic-danger rounded text-xs font-medium hover:bg-rose-50 transition-colors"
                         >
                           Reject
@@ -476,6 +525,18 @@ export default function AdminPortal() {
           </p>
         </div>
       )}
+
+      {/* Universal Action Confirmation Dialog */}
+      <ConfirmModal
+        isOpen={confirmDialog.isOpen}
+        title={confirmDialog.title}
+        message={confirmDialog.message}
+        confirmText={confirmDialog.confirmText}
+        cancelText={confirmDialog.cancelText}
+        variant={confirmDialog.variant}
+        onConfirm={confirmDialog.onConfirm}
+        onCancel={() => setConfirmDialog(prev => ({ ...prev, isOpen: false }))}
+      />
 
     </div>
   );

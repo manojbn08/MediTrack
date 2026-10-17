@@ -44,6 +44,12 @@ public class Delivery {
     @Column(name = "eta_minutes")
     private Integer etaMinutes = 25;
 
+    @Column(name = "pickup_address", length = 500)
+    private String pickupAddress = "MediTrack Central Pharmacy, MG Road, Bengaluru";
+
+    @Column(name = "delivery_address", length = 500)
+    private String deliveryAddress;
+
     @Column(name = "pickup_code")
     private String pickupCode;
 
@@ -105,6 +111,12 @@ public class Delivery {
 
     public Integer getEtaMinutes() { return etaMinutes; }
     public void setEtaMinutes(Integer etaMinutes) { this.etaMinutes = etaMinutes; }
+
+    public String getPickupAddress() { return pickupAddress; }
+    public void setPickupAddress(String pickupAddress) { this.pickupAddress = pickupAddress; }
+
+    public String getDeliveryAddress() { return deliveryAddress; }
+    public void setDeliveryAddress(String deliveryAddress) { this.deliveryAddress = deliveryAddress; }
 
     public String getPickupCode() { return pickupCode; }
     public void setPickupCode(String pickupCode) { this.pickupCode = pickupCode; }

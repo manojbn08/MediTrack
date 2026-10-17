@@ -73,6 +73,9 @@ api.interceptors.response.use(
           localStorage.removeItem('meditrack_token');
           localStorage.removeItem('meditrack_refresh_token');
           localStorage.removeItem('meditrack_user');
+          if (!window.location.pathname.includes('/login')) {
+            window.location.href = '/login';
+          }
           return Promise.reject(refreshErr);
         } finally {
           isRefreshing = false;

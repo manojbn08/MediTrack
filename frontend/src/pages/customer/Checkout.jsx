@@ -4,6 +4,7 @@ import api from '../../api/client';
 import Button from '../../components/Button';
 import RxBadge from '../../components/RxBadge';
 import MapPicker from '../../components/MapPicker';
+import ConfirmModal from '../../components/ConfirmModal';
 import { 
   MapPin, 
   CreditCard, 
@@ -91,6 +92,8 @@ export default function Checkout({ cart, onOrderPlaced }) {
     }
   };
 
+  const [showConfirmOrderModal, setShowConfirmOrderModal] = useState(false);
+
   const handleLocationPicked = (newLat, newLng) => {
     setAddress(prev => ({
       ...prev,
@@ -99,7 +102,7 @@ export default function Checkout({ cart, onOrderPlaced }) {
     }));
   };
 
-  const handlePlaceOrder = async () => {
+  const handlePlaceOrderClick = () => {
     setError('');
     if (isOutOfDeliveryRange) {
       setError(`Delivery location is ${distanceKm} km away, exceeding our 15.0 km licensed delivery radius.`);
@@ -113,7 +116,11 @@ export default function Checkout({ cart, onOrderPlaced }) {
       setError('Please attach a valid doctor prescription for your Rx medicines.');
       return;
     }
+    setShowConfirmOrderModal(true);
+  };
 
+  const executePlaceOrder = async () => {
+    setShowConfirmOrderModal(false);
     setLoading(true);
     try {
       const payload = {
@@ -452,7 +459,7 @@ export default function Checkout({ cart, onOrderPlaced }) {
           <Button 
             className="w-full h-11 text-sm font-semibold"
             loading={loading}
-            onClick={handlePlaceOrder}
+            onClick={handlePlaceOrderClick}
           >
             Confirm & Place Order (₹{total.toFixed(2)})
           </Button>
@@ -469,6 +476,18 @@ export default function Checkout({ cart, onOrderPlaced }) {
         </div>
 
       </div>
+
+      {/* Confirmation Dialog to Accept or Reject Order Placement */}
+      <ConfirmModal
+        isOpen={showConfirmOrderModal}
+        title="Confirm Order Placement"
+        message={`Are you sure you want to place this order of ₹${total.toFixed(2)} with ${paymentMethod} payment to ${address.line1}, ${address.city} (${distanceKm} km from Central Pharmacy)?`}
+        confirmText="Accept & Place Order"
+        cancelText="Reject / Review Details"
+        variant="primary"
+        onConfirm={executePlaceOrder}
+        onCancel={() => setShowConfirmOrderModal(false)}
+      />
     </div>
   );
 }
