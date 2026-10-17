@@ -134,6 +134,24 @@ public class DataInitializer implements CommandLineRunner {
         admin.getRoles().add(adminRole);
         userRepository.save(admin);
 
+        // Seed Pending Pharmacist for Admin Approval verification
+        User pendingPharmacist = new User("Vikram Malhotra (Pharmacist Applicant)", "pending.pharmacist@meditrack.com", "+919876543220", defaultPasswordHash);
+        pendingPharmacist.setStatus(UserStatus.PENDING);
+        pendingPharmacist.setEmailVerified(true);
+        pendingPharmacist.getRoles().add(pharmacistRole);
+        pendingPharmacist = userRepository.save(pendingPharmacist);
+        pharmacistProfileRepository.save(new PharmacistProfile(pendingPharmacist.getId(), "KA-PCI-2026-99120", LocalDate.now().plusYears(5), pharmacy.getId()));
+
+        // Seed Pending Delivery Partner for Admin Approval verification
+        User pendingRider = new User("Anand Verma (Rider Applicant)", "pending.delivery@meditrack.com", "+919876543221", defaultPasswordHash);
+        pendingRider.setStatus(UserStatus.PENDING);
+        pendingRider.setEmailVerified(true);
+        pendingRider.getRoles().add(deliveryRole);
+        pendingRider = userRepository.save(pendingRider);
+        DeliveryPartnerProfile pRiderProfile = new DeliveryPartnerProfile(pendingRider.getId(), "SCOOTER", "KA-05-AB-1234", "DL-052024009871");
+        pRiderProfile.setApprovalStatus(UserStatus.PENDING);
+        deliveryPartnerProfileRepository.save(pRiderProfile);
+
         // 4. Categories
         Category catPain = categoryRepository.save(new Category("Pain & Analgesics", "Fever, headache, body pain remedies"));
         Category catAntibiotics = categoryRepository.save(new Category("Antibiotics & Anti-infectives", "Prescription antibacterial treatments"));

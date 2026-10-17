@@ -50,4 +50,24 @@ public class CatalogService {
     public List<Category> getCategories() {
         return categoryRepository.findAll();
     }
+
+    @Transactional(readOnly = true)
+    public List<Product> getSubstitutes(Long productId) {
+        Product baseProduct = getProductById(productId);
+        if (baseProduct.getGenericName() == null || baseProduct.getGenericName().isBlank()) {
+            return java.util.Collections.emptyList();
+        }
+
+        return productRepository.findAll().stream()
+                .filter(Product::isActive)
+                .filter(p -> !p.getId().equals(baseProduct.getId()))
+                .filter(p -> p.getGenericName() != null && p.getGenericName().equalsIgnoreCase(baseProduct.getGenericName()))
+                .filter(p -> p.getForm() == baseProduct.getForm())
+                .peek(p -> {
+                    Integer stock = batchRepository.getTotalAvailableStock(p.getId());
+                    p.setStockAvailable(stock != null ? stock : 0);
+                })
+                .sorted(java.util.Comparator.comparingDouble(Product::getMrp))
+                .toList();
+    }
 }

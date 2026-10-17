@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import api from '../../api/client';
 import Button from '../../components/Button';
 import RxBadge from '../../components/RxBadge';
+import MapPicker from '../../components/MapPicker';
 import { 
   MapPin, 
   CreditCard, 
@@ -12,8 +13,22 @@ import {
   AlertCircle, 
   CheckCircle2, 
   ShieldCheck, 
-  ArrowLeft 
+  ArrowLeft,
+  Navigation
 } from 'lucide-react';
+
+const PHARMACY_COORDS = [12.9716, 77.5946];
+
+function calculateHaversine(lat1, lon1, lat2, lon2) {
+  const R = 6371; // km
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+            Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+            Math.sin(dLon/2) * Math.sin(dLon/2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  return Math.round(R * c * 10) / 10;
+}
 
 export default function Checkout({ cart, onOrderPlaced }) {
   const navigate = useNavigate();
@@ -34,6 +49,9 @@ export default function Checkout({ cart, onOrderPlaced }) {
     lat: 12.9304,
     lng: 77.6784,
   });
+
+  const distanceKm = calculateHaversine(PHARMACY_COORDS[0], PHARMACY_COORDS[1], address.lat, address.lng);
+  const isOutOfDeliveryRange = distanceKm > 15.0;
 
   const items = cart?.items || [];
   const hasRx = items.some(item => item.product.requiresPrescription);
@@ -73,8 +91,24 @@ export default function Checkout({ cart, onOrderPlaced }) {
     }
   };
 
+  const handleLocationPicked = (newLat, newLng) => {
+    setAddress(prev => ({
+      ...prev,
+      lat: Math.round(newLat * 10000) / 10000,
+      lng: Math.round(newLng * 10000) / 10000
+    }));
+  };
+
   const handlePlaceOrder = async () => {
     setError('');
+    if (isOutOfDeliveryRange) {
+      setError(`Delivery location is ${distanceKm} km away, exceeding our 15.0 km licensed delivery radius.`);
+      return;
+    }
+    if (!address.line1 || !address.pincode) {
+      setError('Please provide address details and pincode.');
+      return;
+    }
     if (hasRx && !selectedPrescriptionId) {
       setError('Please attach a valid doctor prescription for your Rx medicines.');
       return;
@@ -89,7 +123,7 @@ export default function Checkout({ cart, onOrderPlaced }) {
         couponCode: couponApplied ? couponCode.toUpperCase() : null,
         deliveryLat: address.lat,
         deliveryLng: address.lng,
-        deliveryAddressSnapshot: `${address.line1}, ${address.line2}, ${address.city}, ${address.pincode}`,
+        deliveryAddressSnapshot: `${address.line1}, ${address.line2 || ''}, ${address.city}, ${address.pincode}`,
       };
 
       const res = await api.post('/customer/orders', payload);
@@ -139,25 +173,91 @@ export default function Checkout({ cart, onOrderPlaced }) {
         {/* Left Column: Form Sections */}
         <div className="lg:col-span-2 space-y-6">
           
-          {/* Section 1: Delivery Address */}
-          <div className="bg-white rounded-panel border border-neutral-200 p-5 space-y-3">
-            <div className="flex items-center gap-2 text-sm font-semibold text-neutral-900">
-              <MapPin className="w-4 h-4 text-brand" />
-              <span>1. Delivery Destination Address</span>
+          {/* Section 1: Delivery Address & Map Pin */}
+          <div className="bg-white rounded-panel border border-neutral-200 p-5 space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-sm font-semibold text-neutral-900">
+                <MapPin className="w-4 h-4 text-brand" />
+                <span>1. Delivery Destination & Pin Location</span>
+              </div>
+              <span className={`text-xs font-mono-numbers px-2.5 py-1 rounded font-medium border ${
+                isOutOfDeliveryRange 
+                  ? 'bg-red-50 text-red-700 border-red-200' 
+                  : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+              }`}>
+                {distanceKm} km from Hub {isOutOfDeliveryRange ? '(Exceeds 15 km)' : '(In Range)'}
+              </span>
             </div>
 
-            <div className="p-3 bg-neutral-50 border border-neutral-200 rounded-control text-xs space-y-1">
-              <div className="font-semibold text-neutral-900">Delivery Address (Bengaluru Metro Zone)</div>
-              <div className="text-neutral-700">{address.line1}, {address.line2}</div>
-              <div className="text-neutral-600">{address.city}, {address.state} — {address.pincode}</div>
-              <div className="text-[11px] text-neutral-500 font-mono-numbers pt-1">
-                GPS Coordinates: {address.lat.toFixed(4)}° N, {address.lng.toFixed(4)}° E (Inside 15 km Radius)
+            {/* Editable address fields */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+              <div className="sm:col-span-2">
+                <label className="block text-neutral-600 font-medium mb-1">House / Flat / Street (Line 1) *</label>
+                <input 
+                  type="text" 
+                  value={address.line1}
+                  onChange={(e) => setAddress({ ...address, line1: e.target.value })}
+                  className="w-full h-8 px-3 rounded border border-neutral-300 text-xs focus:ring-1 focus:ring-brand focus:border-brand"
+                  placeholder="e.g. Flat 402, Green Glen Layout"
+                  required
+                />
               </div>
+
+              <div>
+                <label className="block text-neutral-600 font-medium mb-1">Area / Landmark (Line 2)</label>
+                <input 
+                  type="text" 
+                  value={address.line2}
+                  onChange={(e) => setAddress({ ...address, line2: e.target.value })}
+                  className="w-full h-8 px-3 rounded border border-neutral-300 text-xs focus:ring-1 focus:ring-brand focus:border-brand"
+                  placeholder="e.g. Outer Ring Road, Bellandur"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-neutral-600 font-medium mb-1">City</label>
+                  <input 
+                    type="text" 
+                    value={address.city}
+                    onChange={(e) => setAddress({ ...address, city: e.target.value })}
+                    className="w-full h-8 px-3 rounded border border-neutral-300 text-xs focus:ring-1 focus:ring-brand focus:border-brand"
+                  />
+                </div>
+                <div>
+                  <label className="block text-neutral-600 font-medium mb-1">Pincode *</label>
+                  <input 
+                    type="text" 
+                    value={address.pincode}
+                    onChange={(e) => setAddress({ ...address, pincode: e.target.value })}
+                    className="w-full h-8 px-3 rounded border border-neutral-300 font-mono-numbers text-xs focus:ring-1 focus:ring-brand focus:border-brand"
+                    placeholder="560103"
+                    required
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Interactive Map Pin Selector */}
+            <div className="space-y-1.5 pt-1">
+              <div className="flex items-center justify-between text-xs text-neutral-600">
+                <span className="font-medium flex items-center gap-1.5">
+                  <Navigation className="w-3.5 h-3.5 text-brand" /> Drop Pin on Map for Precise Courier Navigation:
+                </span>
+                <span className="font-mono-numbers text-[11px] text-neutral-500">
+                  Lat: {address.lat.toFixed(4)}, Lng: {address.lng.toFixed(4)}
+                </span>
+              </div>
+              <MapPicker 
+                lat={address.lat} 
+                lng={address.lng} 
+                onLocationChange={handleLocationPicked} 
+              />
             </div>
           </div>
 
-          {/* Section 2: Prescription Review (Required if Rx items present) */}
-          {hasRx && (
+          {/* Section 2: Prescription Review (Required for Rx, Bypassed for OTC) */}
+          {hasRx ? (
             <div className="bg-white rounded-panel border border-neutral-200 p-5 space-y-3">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2 text-sm font-semibold text-neutral-900">
@@ -216,6 +316,18 @@ export default function Checkout({ cart, onOrderPlaced }) {
                   ))}
                 </div>
               )}
+            </div>
+          ) : (
+            <div className="bg-emerald-50 border border-emerald-200 rounded-panel p-4 flex items-start gap-3">
+              <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
+              <div>
+                <div className="text-xs font-semibold text-emerald-900">
+                  Pure Over-The-Counter (OTC) Order
+                </div>
+                <p className="text-[11px] text-emerald-700 mt-0.5">
+                  Your selected items do not require a prescription under Drugs and Cosmetics Rules. You can place this order immediately without doctor prescription or pharmacist review delays.
+                </p>
+              </div>
             </div>
           )}
 

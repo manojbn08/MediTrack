@@ -75,6 +75,111 @@ export default function Home({ onAddToCart }) {
             Search 1,000+ prescription and OTC drugs, upload doctor prescriptions for instant pharmacist review, and track doorstep delivery with OTP security.
           </p>
 
+          {/* Interactive Role Selection Gateway */}
+          <div className="mb-10 bg-gradient-to-r from-teal-50 via-cyan-50 to-emerald-50 border border-teal-200/80 rounded-xl p-6 shadow-sm">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <span className="text-xs uppercase tracking-wider font-bold text-teal-800">Choose Your Role to Enter Portal</span>
+                <h2 className="text-base font-semibold text-neutral-900">Select your workspace to login or register</h2>
+              </div>
+              <span className="text-[11px] bg-white text-teal-800 font-medium px-2.5 py-1 rounded-full border border-teal-200">
+                Single Sign-On
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              {/* Customer Role */}
+              <div className="bg-white rounded-lg p-4 border border-teal-100 hover:border-teal-500 hover:shadow-md transition-all flex flex-col justify-between">
+                <div>
+                  <div className="w-10 h-10 rounded-lg bg-teal-100 text-teal-700 flex items-center justify-center mb-3">
+                    <HeartPulse className="w-5 h-5" />
+                  </div>
+                  <h3 className="text-sm font-bold text-neutral-900">Customer</h3>
+                  <p className="text-xs text-neutral-500 mt-1 leading-normal">
+                    Order medicines, upload Rx, and track live deliveries.
+                  </p>
+                </div>
+                <div className="mt-4 pt-3 border-t border-neutral-100 flex gap-2">
+                  <Link to="/login?role=customer" className="flex-1 py-1.5 text-center text-xs font-semibold bg-teal-700 text-white rounded hover:bg-teal-800 transition-colors">
+                    Login
+                  </Link>
+                  <Link to="/register?role=customer" className="flex-1 py-1.5 text-center text-xs font-semibold bg-teal-50 text-teal-700 border border-teal-200 rounded hover:bg-teal-100 transition-colors">
+                    Register
+                  </Link>
+                </div>
+              </div>
+
+              {/* Pharmacist Role */}
+              <div className="bg-white rounded-lg p-4 border border-teal-100 hover:border-teal-500 hover:shadow-md transition-all flex flex-col justify-between">
+                <div>
+                  <div className="w-10 h-10 rounded-lg bg-blue-100 text-blue-700 flex items-center justify-center mb-3">
+                    <FileText className="w-5 h-5" />
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <h3 className="text-sm font-bold text-neutral-900">Pharmacist</h3>
+                    <span className="text-[9px] bg-amber-100 text-amber-800 font-bold px-1.5 py-0.5 rounded">Govt. Verified</span>
+                  </div>
+                  <p className="text-xs text-neutral-500 mt-1 leading-normal">
+                    Review Rx, dispense drugs & inspect counter returns.
+                  </p>
+                </div>
+                <div className="mt-4 pt-3 border-t border-neutral-100 flex gap-2">
+                  <Link to="/login?role=pharmacist" className="flex-1 py-1.5 text-center text-xs font-semibold bg-blue-700 text-white rounded hover:bg-blue-800 transition-colors">
+                    Login
+                  </Link>
+                  <Link to="/register?role=pharmacist" className="flex-1 py-1.5 text-center text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-200 rounded hover:bg-blue-100 transition-colors">
+                    Register
+                  </Link>
+                </div>
+              </div>
+
+              {/* Delivery Partner Role */}
+              <div className="bg-white rounded-lg p-4 border border-teal-100 hover:border-teal-500 hover:shadow-md transition-all flex flex-col justify-between">
+                <div>
+                  <div className="w-10 h-10 rounded-lg bg-amber-100 text-amber-700 flex items-center justify-center mb-3">
+                    <Clock className="w-5 h-5" />
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <h3 className="text-sm font-bold text-neutral-900">Delivery Partner</h3>
+                    <span className="text-[9px] bg-amber-100 text-amber-800 font-bold px-1.5 py-0.5 rounded">Rider App</span>
+                  </div>
+                  <p className="text-xs text-neutral-500 mt-1 leading-normal">
+                    Accept pickups, navigate live route & collect COD.
+                  </p>
+                </div>
+                <div className="mt-4 pt-3 border-t border-neutral-100 flex gap-2">
+                  <Link to="/login?role=delivery" className="flex-1 py-1.5 text-center text-xs font-semibold bg-amber-700 text-white rounded hover:bg-amber-800 transition-colors">
+                    Login
+                  </Link>
+                  <Link to="/register?role=delivery" className="flex-1 py-1.5 text-center text-xs font-semibold bg-amber-50 text-amber-800 border border-amber-200 rounded hover:bg-amber-100 transition-colors">
+                    Register
+                  </Link>
+                </div>
+              </div>
+
+              {/* Admin Role */}
+              <div className="bg-white rounded-lg p-4 border border-teal-100 hover:border-teal-500 hover:shadow-md transition-all flex flex-col justify-between">
+                <div>
+                  <div className="w-10 h-10 rounded-lg bg-purple-100 text-purple-700 flex items-center justify-center mb-3">
+                    <ShieldCheck className="w-5 h-5" />
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <h3 className="text-sm font-bold text-neutral-900">Administrator</h3>
+                    <span className="text-[9px] bg-purple-100 text-purple-800 font-bold px-1.5 py-0.5 rounded">Invite Only</span>
+                  </div>
+                  <p className="text-xs text-neutral-500 mt-1 leading-normal">
+                    Approve staff/riders, view audit logs & store KPIs.
+                  </p>
+                </div>
+                <div className="mt-4 pt-3 border-t border-neutral-100">
+                  <Link to="/login?role=admin" className="block w-full py-1.5 text-center text-xs font-semibold bg-purple-700 text-white rounded hover:bg-purple-800 transition-colors">
+                    Admin Portal Login
+                  </Link>
+                </div>
+              </div>
+            </div>
+          </div>
+
           {/* Search Bar */}
           <form onSubmit={handleSearchSubmit} className="flex flex-col sm:flex-row gap-2 max-w-2xl mb-8">
             <div className="relative flex-1">

@@ -33,6 +33,24 @@ public class EmailService {
     }
 
     @Async
+    public void sendSignupOtp(String recipientEmail, String fullName, String otp) {
+        String subject = "MediTrack Account Verification - One-Time Password (OTP)";
+        String htmlBody = "<html><body style='font-family: Arial, sans-serif; color: #333;'>"
+                + "<div style='max-width: 500px; margin: 0 auto; border: 1px solid #e5e7eb; border-radius: 8px; padding: 24px;'>"
+                + "<h2 style='color: #0f766e;'>Welcome to MediTrack!</h2>"
+                + "<p>Hello <strong>" + (fullName != null ? fullName : "Customer") + "</strong>,</p>"
+                + "<p>Thank you for registering with MediTrack. Please use the following 6-digit One-Time Password (OTP) to complete your account verification:</p>"
+                + "<div style='background: #f0fdf4; border: 1px solid #86efac; border-radius: 8px; padding: 16px; margin: 20px 0; text-align: center;'>"
+                + "<h1 style='margin: 0; font-size: 36px; letter-spacing: 8px; color: #15803d; font-family: monospace;'>" + otp + "</h1>"
+                + "</div>"
+                + "<p style='color: #6b7280; font-size: 13px;'>This code is valid for 10 minutes. If you did not request this verification, please ignore this email.</p>"
+                + "<hr style='border: none; border-top: 1px solid #e5e7eb;'/>"
+                + "<small style='color: #9ca3af;'>MediTrack Drug Store & Delivery Platform</small>"
+                + "</div></body></html>";
+        sendHtmlEmail(recipientEmail, subject, htmlBody);
+    }
+
+    @Async
     public void sendOrderConfirmation(Order order, String recipientEmail) {
         String subject = "MediTrack Order Confirmation - #" + order.getOrderNumber();
         String htmlBody = buildOrderConfirmationHtml(order);

@@ -21,13 +21,16 @@ public class CustomerOrderController {
     private final OrderService orderService;
     private final InvoicePdfService invoicePdfService;
     private final QrCodeService qrCodeService;
+    private final OrderReturnRepository orderReturnRepository;
 
     public CustomerOrderController(OrderService orderService,
                                    InvoicePdfService invoicePdfService,
-                                   QrCodeService qrCodeService) {
+                                   QrCodeService qrCodeService,
+                                   OrderReturnRepository orderReturnRepository) {
         this.orderService = orderService;
         this.invoicePdfService = invoicePdfService;
         this.qrCodeService = qrCodeService;
+        this.orderReturnRepository = orderReturnRepository;
     }
 
     @PostMapping
@@ -88,6 +91,31 @@ public class CustomerOrderController {
         response.put("instructions", "Present this QR code or pickup code to the counter pharmacist to collect your order.");
 
         return ResponseEntity.ok(ApiResponse.ok(response));
+    }
+
+    @PostMapping("/{id}/return")
+    public ResponseEntity<ApiResponse<OrderReturn>> requestReturn(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @PathVariable Long id,
+            @RequestBody Map<String, String> body) {
+        Order order = orderService.getOrderById(id);
+        verifyOrderOwnership(order, principal);
+
+        if (order.getStatus() != OrderStatus.DELIVERED) {
+            throw new BusinessException("Only delivered orders can be requested for return", HttpStatus.BAD_REQUEST);
+        }
+
+        String reason = body.getOrDefault("reason", "Medicine defect or incorrect item");
+        OrderReturn orderReturn = new OrderReturn(order.getId(), order.getOrderNumber(), principal.getId(), reason, order.getTotalAmount());
+        orderReturn = orderReturnRepository.save(orderReturn);
+
+        return ResponseEntity.ok(ApiResponse.ok("Return request submitted for pharmacist inspection", orderReturn));
+    }
+
+    @GetMapping("/returns")
+    public ResponseEntity<ApiResponse<List<OrderReturn>>> getMyReturns(@AuthenticationPrincipal UserPrincipal principal) {
+        List<OrderReturn> returns = orderReturnRepository.findByCustomerIdOrderByCreatedAtDesc(principal.getId());
+        return ResponseEntity.ok(ApiResponse.ok(returns));
     }
 
     @PostMapping("/{id}/cancel")

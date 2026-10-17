@@ -65,4 +65,9 @@ public class JwtUtil {
             return false;
         }
     }
+
+    public Date getExpirationDateFromToken(String token) {
+        Claims claims = parseClaims(token);
+        return claims.getExpiration();
+    }
 }

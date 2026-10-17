@@ -13,12 +13,19 @@ export const AuthProvider = ({ children }) => {
     }
   });
   const [token, setToken] = useState(() => localStorage.getItem('meditrack_token') || null);
+  const [refreshToken, setRefreshToken] = useState(() => localStorage.getItem('meditrack_refresh_token') || null);
   const [loading, setLoading] = useState(false);
 
   const saveAuth = (authData) => {
-    setToken(authData.token);
+    if (authData.token) {
+      setToken(authData.token);
+      localStorage.setItem('meditrack_token', authData.token);
+    }
+    if (authData.refreshToken) {
+      setRefreshToken(authData.refreshToken);
+      localStorage.setItem('meditrack_refresh_token', authData.refreshToken);
+    }
     setUser(authData);
-    localStorage.setItem('meditrack_token', authData.token);
     localStorage.setItem('meditrack_user', JSON.stringify(authData));
   };
 
@@ -37,11 +44,28 @@ export const AuthProvider = ({ children }) => {
     setLoading(true);
     try {
       const res = await api.post('/auth/register', formData);
+      if (res.data?.token) {
+        saveAuth(res.data);
+      }
+      return res.data;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const verifyOtp = async (email, otp) => {
+    setLoading(true);
+    try {
+      const res = await api.post('/auth/verify-otp', { email, otp });
       saveAuth(res.data);
       return res.data;
     } finally {
       setLoading(false);
     }
+  };
+
+  const resendOtp = async (email) => {
+    return api.post('/auth/resend-otp', { email });
   };
 
   const quickLogin = async (roleKey) => {
@@ -57,11 +81,20 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  const logout = () => {
-    setToken(null);
-    setUser(null);
-    localStorage.removeItem('meditrack_token');
-    localStorage.removeItem('meditrack_user');
+  const logout = async () => {
+    try {
+      const currentRefresh = localStorage.getItem('meditrack_refresh_token');
+      await api.post('/auth/logout', { refreshToken: currentRefresh });
+    } catch (e) {
+      // Ignore network errors during logout
+    } finally {
+      setToken(null);
+      setRefreshToken(null);
+      setUser(null);
+      localStorage.removeItem('meditrack_token');
+      localStorage.removeItem('meditrack_refresh_token');
+      localStorage.removeItem('meditrack_user');
+    }
   };
 
   const hasRole = (roleName) => {
@@ -71,7 +104,7 @@ export const AuthProvider = ({ children }) => {
   };
 
   return (
-    <AuthContext.Provider value={{ user, token, loading, login, register, quickLogin, logout, hasRole }}>
+    <AuthContext.Provider value={{ user, token, refreshToken, loading, login, register, verifyOtp, resendOtp, quickLogin, logout, hasRole }}>
       {children}
     </AuthContext.Provider>
   );

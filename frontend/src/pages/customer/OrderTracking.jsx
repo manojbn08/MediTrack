@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import api from '../../api/client';
+import { subscribeToTopic } from '../../api/websocket';
 import StatusChip from '../../components/StatusChip';
 import TrackingMap from '../../components/TrackingMap';
 import Button from '../../components/Button';
@@ -13,7 +14,10 @@ import {
   Circle, 
   ShieldCheck, 
   Pill, 
-  FileText 
+  FileText,
+  Download,
+  RotateCcw,
+  AlertCircle
 } from 'lucide-react';
 
 export default function OrderTracking() {
@@ -21,6 +25,12 @@ export default function OrderTracking() {
   const [order, setOrder] = useState(null);
   const [delivery, setDelivery] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [riderPos, setRiderPos] = useState([12.9510, 77.6365]);
+  const [etaMinutes, setEtaMinutes] = useState(20);
+  const [showReturnModal, setShowReturnModal] = useState(false);
+  const [returnReason, setReturnReason] = useState('');
+  const [returnSubmitting, setReturnSubmitting] = useState(false);
+  const [returnSuccessMsg, setReturnSuccessMsg] = useState('');
 
   useEffect(() => {
     const fetchOrderAndDelivery = async () => {
@@ -31,8 +41,14 @@ export default function OrderTracking() {
         try {
           const delRes = await api.get(`/delivery/order/${id}`);
           setDelivery(delRes.data);
+          if (delRes.data?.currentLat && delRes.data?.currentLng) {
+            setRiderPos([delRes.data.currentLat, delRes.data.currentLng]);
+          }
+          if (delRes.data?.etaMinutes != null) {
+            setEtaMinutes(delRes.data.etaMinutes);
+          }
         } catch {
-          // Delivery record might not exist until packed
+          // Delivery record might not exist until assigned
         }
       } catch (err) {
         console.error(err);
@@ -42,8 +58,27 @@ export default function OrderTracking() {
     };
 
     fetchOrderAndDelivery();
-    const interval = setInterval(fetchOrderAndDelivery, 10000); // Poll status every 10s
-    return () => clearInterval(interval);
+
+    // Subscribe to real-time status and live GPS location via WebSocket
+    const unsubStatus = subscribeToTopic(`/topic/orders/${id}/status`, (msg) => {
+      setOrder(prev => prev ? { ...prev, ...msg, status: msg.status || prev.status } : msg);
+    });
+
+    const unsubLoc = subscribeToTopic(`/topic/orders/${id}/location`, (loc) => {
+      if (loc?.currentLat && loc?.currentLng) {
+        setRiderPos([loc.currentLat, loc.currentLng]);
+      } else if (loc?.lat && loc?.lng) {
+        setRiderPos([loc.lat, loc.lng]);
+      }
+      if (loc?.etaMinutes != null) {
+        setEtaMinutes(loc.etaMinutes);
+      }
+    });
+
+    return () => {
+      if (unsubStatus) unsubStatus();
+      if (unsubLoc) unsubLoc();
+    };
   }, [id]);
 
   if (loading) {
@@ -99,12 +134,81 @@ export default function OrderTracking() {
     return 'pending';
   };
 
+  const handleDownloadInvoice = async () => {
+    try {
+      const token = localStorage.getItem('meditrack_token');
+      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:8080/api'}/customer/orders/${id}/invoice`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!response.ok) throw new Error('Invoice PDF is not available yet');
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `Invoice-${order.orderNumber}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    } catch (err) {
+      alert(err.message || 'Invoice download failed');
+    }
+  };
+
+  const handleRequestReturn = async (e) => {
+    e.preventDefault();
+    if (!returnReason.trim()) return;
+    setReturnSubmitting(true);
+    try {
+      await api.post(`/customer/orders/${id}/returns`, {
+        reason: returnReason,
+        condition: 'UNOPENED'
+      });
+      setReturnSuccessMsg('Return request submitted for pharmacist quality review.');
+      setShowReturnModal(false);
+      setReturnReason('');
+    } catch (err) {
+      alert(err.response?.data?.message || err.message || 'Failed to submit return');
+    } finally {
+      setReturnSubmitting(false);
+    }
+  };
+
   return (
     <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
       
-      <Link to="/customer/orders" className="text-xs text-neutral-600 hover:text-neutral-900 inline-flex items-center gap-1 font-medium">
-        <ArrowLeft className="w-3.5 h-3.5" /> Back to My Orders
-      </Link>
+      <div className="flex items-center justify-between">
+        <Link to="/customer/orders" className="text-xs text-neutral-600 hover:text-neutral-900 inline-flex items-center gap-1 font-medium">
+          <ArrowLeft className="w-3.5 h-3.5" /> Back to My Orders
+        </Link>
+
+        <div className="flex items-center gap-2">
+          {order.status === 'DELIVERED' && (
+            <button
+              onClick={() => setShowReturnModal(true)}
+              className="text-xs font-medium px-3 py-1.5 rounded-control border border-neutral-300 text-neutral-700 hover:bg-neutral-50 inline-flex items-center gap-1.5 shadow-sm"
+            >
+              <RotateCcw className="w-3.5 h-3.5 text-neutral-500" /> Request Return
+            </button>
+          )}
+
+          <button
+            onClick={handleDownloadInvoice}
+            className="text-xs font-medium px-3 py-1.5 rounded-control bg-brand text-white hover:bg-brand-pressed inline-flex items-center gap-1.5 shadow-sm"
+          >
+            <Download className="w-3.5 h-3.5" /> GST Invoice PDF
+          </button>
+        </div>
+      </div>
+
+      {returnSuccessMsg && (
+        <div className="p-3.5 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs rounded-control flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+            <span>{returnSuccessMsg}</span>
+          </div>
+          <button onClick={() => setReturnSuccessMsg('')} className="font-semibold text-xs">Dismiss</button>
+        </div>
+      )}
 
       {/* Header bar */}
       <div className="bg-white rounded-panel border border-neutral-200 p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-sm">
@@ -151,14 +255,14 @@ export default function OrderTracking() {
                 <span>Live Fulfillment & Delivery Map</span>
               </h2>
               <span className="text-xs text-neutral-500 font-mono-numbers">
-                ETA: ~{delivery?.etaMinutes || '20'} mins
+                ETA: ~{etaMinutes} mins
               </span>
             </div>
 
             <TrackingMap 
               pharmacyPos={[12.9716, 77.5946]}
               customerPos={[order.deliveryLat || 12.9304, order.deliveryLng || 77.6784]}
-              riderPos={[12.9510, 77.6365]}
+              riderPos={riderPos}
               status={order.status}
             />
 
@@ -285,6 +389,68 @@ export default function OrderTracking() {
         </div>
 
       </div>
+
+      {/* Return Request Modal */}
+      {showReturnModal && (
+        <div className="fixed inset-0 bg-neutral-900/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-panel border border-neutral-200 p-6 max-w-md w-full shadow-xl space-y-4">
+            <div className="flex items-center justify-between border-b border-neutral-100 pb-3">
+              <h3 className="font-semibold text-sm text-neutral-900 flex items-center gap-2">
+                <RotateCcw className="w-4 h-4 text-brand" /> Request Medication Return
+              </h3>
+              <button 
+                onClick={() => setShowReturnModal(false)}
+                className="text-neutral-400 hover:text-neutral-600 text-sm font-semibold"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="text-xs text-neutral-600 space-y-2">
+              <p>
+                In compliance with CDSCO regulatory requirements, returned medicines must have unbroken safety seals and must not require strict cold-chain refrigeration.
+              </p>
+              
+              <label className="block font-medium text-neutral-700 mt-3">Reason for Return *</label>
+              <select
+                value={returnReason}
+                onChange={(e) => setReturnReason(e.target.value)}
+                className="w-full h-8 px-2 border border-neutral-300 rounded text-xs focus:ring-1 focus:ring-brand focus:border-brand"
+                required
+              >
+                <option value="">Select a reason...</option>
+                <option value="Physician modified prescription dosage">Physician modified prescription dosage</option>
+                <option value="Damaged outer tamper seal upon delivery">Damaged outer tamper seal upon delivery</option>
+                <option value="Ordered incorrect strength or formulation">Ordered incorrect strength or formulation</option>
+                <option value="Patient experienced adverse reaction">Patient experienced adverse reaction</option>
+                <option value="Delivered item did not match order">Delivered item did not match order</option>
+              </select>
+
+              <div className="p-2.5 bg-neutral-50 border border-neutral-200 rounded text-[11px] text-neutral-500 mt-2">
+                <strong>Inspection Guarantee:</strong> A pharmacist will inspect the batch number ({order.items?.[0]?.batchNumber || 'Batch'}) and seal integrity before refund or store credit release.
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-neutral-100">
+              <Button 
+                variant="secondary" 
+                size="sm" 
+                onClick={() => setShowReturnModal(false)}
+              >
+                Cancel
+              </Button>
+              <Button 
+                size="sm" 
+                disabled={!returnReason || returnSubmitting}
+                onClick={handleRequestReturn}
+              >
+                {returnSubmitting ? 'Submitting...' : 'Confirm Return Request'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }

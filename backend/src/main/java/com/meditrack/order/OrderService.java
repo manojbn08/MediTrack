@@ -209,6 +209,7 @@ public class OrderService {
                 order.getStatus().name(),
                 "Order placed successfully"
         );
+        realtimeTrackingService.publishNewOrderToPharmacists(order);
 
         return order;
     }
@@ -293,6 +294,14 @@ public class OrderService {
             d.setCodAmount(savedOrder.getPaymentMethod() == PaymentMethod.COD ? savedOrder.getTotalAmount() : 0.0);
             deliveryRepository.save(d);
         }
+
+        realtimeTrackingService.publishAvailablePickupToCouriers(savedOrder);
+        realtimeTrackingService.publishOrderStatus(
+                savedOrder.getId(),
+                savedOrder.getOrderNumber(),
+                savedOrder.getStatus().name(),
+                "Packed and waiting for delivery partner pickup"
+        );
 
         return savedOrder;
     }

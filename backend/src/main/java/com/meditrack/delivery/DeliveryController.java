@@ -51,6 +51,17 @@ public class DeliveryController {
         return ResponseEntity.ok(ApiResponse.ok("Out for delivery", delivery));
     }
 
+    @PostMapping("/{id}/location")
+    public ResponseEntity<ApiResponse<Delivery>> updateLocation(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @PathVariable Long id,
+            @RequestBody Map<String, Double> body) {
+        Double lat = body.get("latitude");
+        Double lng = body.get("longitude");
+        Delivery delivery = deliveryService.updateLocation(id, principal.getId(), lat, lng);
+        return ResponseEntity.ok(ApiResponse.ok("Location updated", delivery));
+    }
+
     @PostMapping("/{id}/complete")
     public ResponseEntity<ApiResponse<Delivery>> completeDelivery(
             @AuthenticationPrincipal UserPrincipal principal,

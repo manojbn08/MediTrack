@@ -5,9 +5,12 @@ import com.meditrack.order.Order;
 import com.meditrack.order.OrderRepository;
 import com.meditrack.order.OrderStatus;
 import com.meditrack.order.OrderStateMachine;
+import com.meditrack.order.RealtimeTrackingService;
 import com.meditrack.payment.Payment;
 import com.meditrack.payment.PaymentRepository;
 import com.meditrack.payment.PaymentStatus;
+import com.meditrack.user.DeliveryPartnerProfile;
+import com.meditrack.user.DeliveryPartnerProfileRepository;
 import com.meditrack.user.User;
 import com.meditrack.user.UserRepository;
 import org.springframework.http.HttpStatus;
@@ -26,17 +29,23 @@ public class DeliveryService {
     private final OrderStateMachine orderStateMachine;
     private final UserRepository userRepository;
     private final PaymentRepository paymentRepository;
+    private final RealtimeTrackingService realtimeTrackingService;
+    private final DeliveryPartnerProfileRepository deliveryPartnerProfileRepository;
 
     public DeliveryService(DeliveryRepository deliveryRepository,
                            OrderRepository orderRepository,
                            OrderStateMachine orderStateMachine,
                            UserRepository userRepository,
-                           PaymentRepository paymentRepository) {
+                           PaymentRepository paymentRepository,
+                           RealtimeTrackingService realtimeTrackingService,
+                           DeliveryPartnerProfileRepository deliveryPartnerProfileRepository) {
         this.deliveryRepository = deliveryRepository;
         this.orderRepository = orderRepository;
         this.orderStateMachine = orderStateMachine;
         this.userRepository = userRepository;
         this.paymentRepository = paymentRepository;
+        this.realtimeTrackingService = realtimeTrackingService;
+        this.deliveryPartnerProfileRepository = deliveryPartnerProfileRepository;
     }
 
     @Transactional(readOnly = true)
@@ -78,6 +87,17 @@ public class DeliveryService {
         orderStateMachine.transition(order, OrderStatus.ASSIGNED, "DELIVERY", "Assigned to partner " + partner.getFullName());
         orderRepository.save(order);
 
+        String vehicleNo = deliveryPartnerProfileRepository.findById(partnerId)
+                .map(DeliveryPartnerProfile::getVehicleNumber).orElse("KA-01-EQ-9999");
+
+        realtimeTrackingService.publishCourierAssignedToPharmacist(order.getId(), partner.getFullName(), partner.getPhone(), vehicleNo);
+        realtimeTrackingService.publishOrderStatus(
+                order.getId(),
+                order.getOrderNumber(),
+                OrderStatus.ASSIGNED.name(),
+                "Delivery partner " + partner.getFullName() + " accepted the pickup"
+        );
+
         return delivery;
     }
 
@@ -98,6 +118,13 @@ public class DeliveryService {
         orderStateMachine.transition(order, OrderStatus.PICKED_UP, "DELIVERY", "Picked up from pharmacy counter");
         orderRepository.save(order);
 
+        realtimeTrackingService.publishOrderStatus(
+                order.getId(),
+                order.getOrderNumber(),
+                OrderStatus.PICKED_UP.name(),
+                "Order picked up from pharmacy by partner"
+        );
+
         return delivery;
     }
 
@@ -112,6 +139,44 @@ public class DeliveryService {
         Order order = orderRepository.findById(delivery.getOrderId()).orElseThrow();
         orderStateMachine.transition(order, OrderStatus.OUT_FOR_DELIVERY, "DELIVERY", "Partner is on the way. Delivery OTP generated.");
         orderRepository.save(order);
+
+        double distanceKm = calculateHaversine(delivery.getPickupLat(), delivery.getPickupLng(), delivery.getDeliveryLat(), delivery.getDeliveryLng());
+        double etaMinutes = Math.max(10.0, Math.round((5.0 + (distanceKm / 20.0) * 60.0) * 10.0) / 10.0);
+
+        realtimeTrackingService.publishOrderStatus(
+                order.getId(),
+                order.getOrderNumber(),
+                OrderStatus.OUT_FOR_DELIVERY.name(),
+                "Partner is on the way with your medicines. ETA: " + (int)etaMinutes + " mins",
+                etaMinutes
+        );
+
+        return delivery;
+    }
+
+    @Transactional
+    public Delivery updateLocation(Long deliveryId, Long partnerId, Double lat, Double lng) {
+        Delivery delivery = deliveryRepository.findById(deliveryId)
+                .orElseThrow(() -> new BusinessException("Delivery not found", HttpStatus.NOT_FOUND));
+
+        deliveryPartnerProfileRepository.findById(partnerId).ifPresent(p -> {
+            p.setCurrentLat(lat);
+            p.setCurrentLng(lng);
+            p.setLastLocationAt(LocalDateTime.now());
+            deliveryPartnerProfileRepository.save(p);
+        });
+
+        double remainingKm = calculateHaversine(lat, lng, delivery.getDeliveryLat(), delivery.getDeliveryLng());
+        double etaMinutes = Math.max(2.0, Math.round(((remainingKm / 20.0) * 60.0) * 10.0) / 10.0);
+
+        realtimeTrackingService.publishDeliveryLocation(
+                delivery.getOrderId(),
+                lat,
+                lng,
+                delivery.getStatus().name(),
+                remainingKm,
+                etaMinutes
+        );
 
         return delivery;
     }
@@ -143,6 +208,13 @@ public class DeliveryService {
             });
         }
 
+        realtimeTrackingService.publishOrderStatus(
+                order.getId(),
+                order.getOrderNumber(),
+                OrderStatus.DELIVERED.name(),
+                "Delivered successfully"
+        );
+
         return delivery;
     }
 
@@ -152,28 +224,44 @@ public class DeliveryService {
                 .orElseThrow(() -> new BusinessException("Delivery not found", HttpStatus.NOT_FOUND));
 
         delivery.setStatus(DeliveryStatus.FAILED);
-        delivery.setFailureReason(reason);
         delivery = deliveryRepository.save(delivery);
 
         Order order = orderRepository.findById(delivery.getOrderId()).orElseThrow();
         orderStateMachine.transition(order, OrderStatus.DELIVERY_FAILED, "DELIVERY", "Delivery failed: " + reason);
         orderRepository.save(order);
 
+        realtimeTrackingService.publishOrderStatus(
+                order.getId(),
+                order.getOrderNumber(),
+                OrderStatus.DELIVERY_FAILED.name(),
+                "Delivery attempt failed: " + reason
+        );
+
         return delivery;
     }
 
     @Transactional(readOnly = true)
     public Map<String, Object> getEarningsSummary(Long partnerId) {
-        List<Delivery> delivered = deliveryRepository.findByPartnerIdOrderByAssignedAtDesc(partnerId)
-                .stream().filter(d -> d.getStatus() == DeliveryStatus.DELIVERED).toList();
-
-        double totalEarnings = delivered.size() * 65.0; // ₹65 per delivery flat rate + incentive
-        double totalCod = delivered.stream().filter(Delivery::isCodCollected).mapToDouble(Delivery::getCodAmount).sum();
-
+        List<Delivery> delivered = deliveryRepository.findByPartnerIdAndStatus(partnerId, DeliveryStatus.DELIVERED);
+        double totalPayout = delivered.size() * 50.0; // Flat ₹50 per delivery
+        int count = delivered.size();
         return Map.of(
-                "deliveriesCount", delivered.size(),
-                "totalEarnings", totalEarnings,
-                "codCollectedToSettle", totalCod
+                "partnerId", partnerId,
+                "totalDelivered", count,
+                "earningsPerDelivery", 50.0,
+                "totalEarnings", totalPayout,
+                "currency", "INR"
         );
+    }
+
+    public double calculateHaversine(double lat1, double lon1, double lat2, double lon2) {
+        final int R = 6371; // Earth radius in KM
+        double dLat = Math.toRadians(lat2 - lat1);
+        double dLon = Math.toRadians(lon2 - lon1);
+        double a = Math.sin(dLat / 2) * Math.sin(dLat / 2)
+                + Math.cos(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2))
+                * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+        double c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        return Math.round(R * c * 100.0) / 100.0;
     }
 }

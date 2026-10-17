@@ -11,11 +11,14 @@ import {
   TrendingUp, 
   UserX, 
   UserCheck, 
-  Truck 
+  Truck,
+  FileText,
+  Clock,
+  AlertCircle
 } from 'lucide-react';
 
 export default function AdminPortal() {
-  const [activeTab, setActiveTab] = useState('users'); // 'users', 'approvals', 'orders', 'settings'
+  const [activeTab, setActiveTab] = useState('users'); // 'users', 'approvals', 'orders', 'audit', 'settings'
   const [kpis, setKpis] = useState({
     totalRevenue: 0,
     totalOrders: 0,
@@ -25,22 +28,25 @@ export default function AdminPortal() {
   const [users, setUsers] = useState([]);
   const [approvals, setApprovals] = useState([]);
   const [orders, setOrders] = useState([]);
+  const [auditLogs, setAuditLogs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [notification, setNotification] = useState('');
 
   const loadData = async () => {
     try {
-      const [kpiRes, usersRes, appRes, ordersRes] = await Promise.all([
-        api.get('/admin/dashboard'),
-        api.get('/admin/users'),
-        api.get('/admin/approvals'),
-        api.get('/admin/orders'),
+      const [kpiRes, usersRes, appRes, ordersRes, auditRes] = await Promise.all([
+        api.get('/admin/dashboard').catch(() => ({ data: {} })),
+        api.get('/admin/users').catch(() => ({ data: [] })),
+        api.get('/admin/pending-approvals').catch(() => ({ data: [] })),
+        api.get('/admin/orders').catch(() => ({ data: [] })),
+        api.get('/admin/audit-logs').catch(() => ({ data: [] }))
       ]);
 
-      setKpis(kpiRes.data || {});
-      setUsers(usersRes.data || []);
-      setApprovals(appRes.data || []);
-      setOrders(ordersRes.data || []);
+      setKpis(kpiRes.data || kpiRes || {});
+      setUsers(Array.isArray(usersRes.data) ? usersRes.data : (Array.isArray(usersRes) ? usersRes : []));
+      setApprovals(Array.isArray(appRes.data) ? appRes.data : (Array.isArray(appRes) ? appRes : []));
+      setOrders(Array.isArray(ordersRes.data) ? ordersRes.data : (Array.isArray(ordersRes) ? ordersRes : []));
+      setAuditLogs(Array.isArray(auditRes.data) ? auditRes.data : (Array.isArray(auditRes) ? auditRes : []));
     } catch (err) {
       console.error(err);
     } finally {
@@ -63,13 +69,19 @@ export default function AdminPortal() {
     }
   };
 
-  const handleApproval = async (userId, status) => {
+  const handleApprovalAction = async (userId, action) => {
     try {
-      await api.put(`/admin/approvals/${userId}`, { status });
-      setNotification(`Partner application has been ${status}.`);
+      if (action === 'approve') {
+        await api.post(`/admin/approvals/${userId}/approve`);
+        setNotification(`User #${userId} has been approved and notified.`);
+      } else {
+        const reason = prompt('Enter rejection reason:', 'Credentials did not satisfy compliance standards') || 'Credentials incomplete';
+        await api.post(`/admin/approvals/${userId}/reject`, { reason });
+        setNotification(`User #${userId} application rejected.`);
+      }
       loadData();
     } catch (err) {
-      alert(err.message || 'Approval failed');
+      alert(err.response?.data?.message || err.message || 'Action failed');
     }
   };
 
@@ -100,7 +112,7 @@ export default function AdminPortal() {
             onClick={() => setActiveTab('approvals')}
             className={`px-3 py-1.5 rounded-control font-medium ${activeTab === 'approvals' ? 'bg-white text-brand shadow-sm font-semibold' : 'text-neutral-600'}`}
           >
-            Partner Approvals ({approvals.length})
+            Pending Approvals ({approvals.length})
           </button>
           <button
             onClick={() => setActiveTab('orders')}
@@ -109,10 +121,16 @@ export default function AdminPortal() {
             All Orders ({orders.length})
           </button>
           <button
+            onClick={() => setActiveTab('audit')}
+            className={`px-3 py-1.5 rounded-control font-medium ${activeTab === 'audit' ? 'bg-white text-brand shadow-sm font-semibold' : 'text-neutral-600'}`}
+          >
+            Audit Logs ({auditLogs.length})
+          </button>
+          <button
             onClick={() => setActiveTab('settings')}
             className={`px-3 py-1.5 rounded-control font-medium ${activeTab === 'settings' ? 'bg-white text-brand shadow-sm font-semibold' : 'text-neutral-600'}`}
           >
-            System Settings
+            Settings
           </button>
         </div>
       </div>
@@ -221,55 +239,102 @@ export default function AdminPortal() {
       {/* TAB 2: Partner Approvals */}
       {activeTab === 'approvals' && (
         <div className="bg-white rounded-panel border border-neutral-200 overflow-hidden shadow-sm">
-          <div className="p-4 border-b border-neutral-200 font-semibold text-sm text-neutral-900">
-            Delivery Partner Verification & Compliance Verification
+          <div className="p-4 border-b border-neutral-200 flex items-center justify-between">
+            <div>
+              <h2 className="font-semibold text-sm text-neutral-900">
+                Pending Regulatory & Partner Approvals
+              </h2>
+              <p className="text-xs text-neutral-500 mt-0.5">
+                Review credential verification for Pharmacists and Delivery Fleet prior to portal authorization
+              </p>
+            </div>
+            <span className="text-xs px-2.5 py-1 bg-amber-50 text-amber-700 font-medium rounded-full border border-amber-200">
+              {approvals.length} Pending Review
+            </span>
           </div>
 
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead className="bg-neutral-50 border-b border-neutral-200 text-neutral-600 font-semibold uppercase text-[10px] tracking-wider">
-                <tr>
-                  <th className="py-2.5 px-4">Partner ID</th>
-                  <th className="py-2.5 px-4">Vehicle Type</th>
-                  <th className="py-2.5 px-4">Reg Plate</th>
-                  <th className="py-2.5 px-4">Driving License No</th>
-                  <th className="py-2.5 px-4">Approval Status</th>
-                  <th className="py-2.5 px-4 text-right">Decision</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-neutral-100 font-mono-numbers">
-                {approvals.map(p => (
-                  <tr key={p.userId} className="hover:bg-neutral-50 transition-colors">
-                    <td className="py-2.5 px-4 text-neutral-500">#{p.userId}</td>
-                    <td className="py-2.5 px-4 font-sans font-medium text-neutral-900">{p.vehicleType}</td>
-                    <td className="py-2.5 px-4 font-bold text-neutral-800">{p.vehicleNumber || 'KA-01-MJ-4021'}</td>
-                    <td className="py-2.5 px-4 text-neutral-600">{p.drivingLicenseNo || 'DL-KA-2022-001'}</td>
-                    <td className="py-2.5 px-4 font-sans">
-                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${
-                        p.approvalStatus === 'APPROVED' ? 'bg-semantic-success-tint text-semantic-success' : 'bg-semantic-warning-tint text-semantic-warning'
-                      }`}>
-                        {p.approvalStatus}
-                      </span>
-                    </td>
-                    <td className="py-2.5 px-4 text-right font-sans space-x-2">
-                      <button
-                        onClick={() => handleApproval(p.userId, 'APPROVED')}
-                        className="text-xs text-semantic-success hover:underline font-semibold"
-                      >
-                        Approve
-                      </button>
-                      <button
-                        onClick={() => handleApproval(p.userId, 'REJECTED')}
-                        className="text-xs text-semantic-danger hover:underline"
-                      >
-                        Reject
-                      </button>
-                    </td>
+          {approvals.length === 0 ? (
+            <div className="p-8 text-center text-neutral-500 text-xs">
+              <CheckCircle className="w-8 h-8 text-semantic-success mx-auto mb-2 opacity-80" />
+              All partner and pharmacist registrations are up to date. No pending approvals.
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-neutral-50 border-b border-neutral-200 text-neutral-600 font-semibold uppercase text-[10px] tracking-wider">
+                  <tr>
+                    <th className="py-2.5 px-4">Applicant</th>
+                    <th className="py-2.5 px-4">Role</th>
+                    <th className="py-2.5 px-4">Contact</th>
+                    <th className="py-2.5 px-4">License / Registration Details</th>
+                    <th className="py-2.5 px-4">Applied At</th>
+                    <th className="py-2.5 px-4 text-right">Verification Action</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody className="divide-y divide-neutral-100">
+                  {approvals.map(p => (
+                    <tr key={p.id} className="hover:bg-neutral-50 transition-colors">
+                      <td className="py-3 px-4">
+                        <div className="font-semibold text-neutral-900">{p.fullName}</div>
+                        <div className="text-[11px] text-neutral-400 font-mono-numbers">ID #{p.id}</div>
+                      </td>
+                      <td className="py-3 px-4">
+                        <span className={`px-2 py-0.5 rounded text-[10px] font-semibold uppercase ${
+                          p.role === 'PHARMACIST' 
+                            ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' 
+                            : 'bg-blue-50 text-blue-700 border border-blue-200'
+                        }`}>
+                          {p.role}
+                        </span>
+                      </td>
+                      <td className="py-3 px-4">
+                        <div className="text-neutral-800">{p.email}</div>
+                        <div className="text-neutral-500 font-mono-numbers text-[11px]">{p.phone}</div>
+                      </td>
+                      <td className="py-3 px-4">
+                        {p.role === 'PHARMACIST' ? (
+                          <div className="space-y-0.5">
+                            <div className="font-mono-numbers font-medium text-neutral-800">
+                              Lic: {p.licenseNumber || 'Pending verification'}
+                            </div>
+                            <div className="text-[11px] text-neutral-500">
+                              Exp: {p.licenseValidTill || 'N/A'} {p.pharmacyId ? `| Pharmacy #${p.pharmacyId}` : ''}
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="space-y-0.5">
+                            <div className="font-mono-numbers font-medium text-neutral-800">
+                              {p.vehicleType || 'BIKE'} • {p.vehicleNumber || 'Pending'}
+                            </div>
+                            <div className="text-[11px] text-neutral-500 font-mono-numbers">
+                              DL: {p.drivingLicenseNo || 'N/A'}
+                            </div>
+                          </div>
+                        )}
+                      </td>
+                      <td className="py-3 px-4 font-mono-numbers text-neutral-500 text-[11px]">
+                        {p.createdAt ? new Date(p.createdAt).toLocaleDateString() : 'Recent'}
+                      </td>
+                      <td className="py-3 px-4 text-right space-x-2">
+                        <button
+                          onClick={() => handleApprovalAction(p.id, 'approve')}
+                          className="px-2.5 py-1 bg-semantic-success text-white rounded text-xs font-medium hover:bg-emerald-700 transition-colors shadow-sm"
+                        >
+                          Approve
+                        </button>
+                        <button
+                          onClick={() => handleApprovalAction(p.id, 'reject')}
+                          className="px-2.5 py-1 bg-white border border-semantic-danger text-semantic-danger rounded text-xs font-medium hover:bg-rose-50 transition-colors"
+                        >
+                          Reject
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
 
@@ -311,7 +376,73 @@ export default function AdminPortal() {
         </div>
       )}
 
-      {/* TAB 4: System Parameters */}
+      {/* TAB 4: Immutable Audit Trail */}
+      {activeTab === 'audit' && (
+        <div className="bg-white rounded-panel border border-neutral-200 overflow-hidden shadow-sm">
+          <div className="p-4 border-b border-neutral-200 flex items-center justify-between">
+            <div>
+              <h2 className="font-semibold text-sm text-neutral-900 flex items-center gap-2">
+                <FileText className="w-4 h-4 text-brand" /> Regulatory & Security Audit Log
+              </h2>
+              <p className="text-xs text-neutral-500 mt-0.5">
+                Append-only immutable record of credential modifications, approvals, overrides, and security events
+              </p>
+            </div>
+            <span className="text-xs font-mono-numbers px-2.5 py-1 bg-neutral-100 text-neutral-700 rounded border border-neutral-200">
+              {auditLogs.length} Records
+            </span>
+          </div>
+
+          {auditLogs.length === 0 ? (
+            <div className="p-8 text-center text-neutral-500 text-xs">
+              No audit records registered yet. System actions are recorded automatically.
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-neutral-50 border-b border-neutral-200 text-neutral-600 font-semibold uppercase text-[10px] tracking-wider">
+                  <tr>
+                    <th className="py-2.5 px-4">Timestamp</th>
+                    <th className="py-2.5 px-4">Action</th>
+                    <th className="py-2.5 px-4">Entity</th>
+                    <th className="py-2.5 px-4">Performed By</th>
+                    <th className="py-2.5 px-4">IP / Client</th>
+                    <th className="py-2.5 px-4">Details</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-neutral-100 font-mono-numbers text-[11px]">
+                  {auditLogs.map((log, idx) => (
+                    <tr key={log.id || idx} className="hover:bg-neutral-50 transition-colors">
+                      <td className="py-2.5 px-4 text-neutral-500 whitespace-nowrap">
+                        {log.createdAt ? new Date(log.createdAt).toLocaleString() : 'Just now'}
+                      </td>
+                      <td className="py-2.5 px-4">
+                        <span className="px-2 py-0.5 rounded font-mono-numbers font-semibold text-[10px] bg-brand-tint text-brand border border-teal-200">
+                          {log.action}
+                        </span>
+                      </td>
+                      <td className="py-2.5 px-4 text-neutral-800">
+                        {log.entityName} {log.entityId ? `#${log.entityId}` : ''}
+                      </td>
+                      <td className="py-2.5 px-4 font-sans text-neutral-900 font-medium">
+                        {log.performedBy || 'SYSTEM'}
+                      </td>
+                      <td className="py-2.5 px-4 text-neutral-500">
+                        {log.ipAddress || '127.0.0.1'}
+                      </td>
+                      <td className="py-2.5 px-4 font-sans text-neutral-600 max-w-md truncate">
+                        {log.details || '—'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* TAB 5: System Parameters */}
       {activeTab === 'settings' && (
         <div className="bg-white rounded-panel border border-neutral-200 p-6 shadow-sm space-y-4 max-w-2xl">
           <h2 className="text-sm font-semibold text-neutral-900 flex items-center gap-2">

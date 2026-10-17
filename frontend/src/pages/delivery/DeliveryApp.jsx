@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import api from '../../api/client';
+import { subscribeToTopic } from '../../api/websocket';
 import Button from '../../components/Button';
 import TrackingMap from '../../components/TrackingMap';
 import { 
@@ -11,13 +12,15 @@ import {
   Navigation, 
   Key, 
   DollarSign, 
-  Power 
+  Power,
+  Radio
 } from 'lucide-react';
 
 export default function DeliveryApp() {
   const [online, setOnline] = useState(true);
   const [offers, setOffers] = useState([]);
   const [activeDelivery, setActiveDelivery] = useState(null);
+  const [riderPos, setRiderPos] = useState([12.9510, 77.6365]);
   const [pickupCodeInput, setPickupCodeInput] = useState('');
   const [deliveryOtpInput, setDeliveryOtpInput] = useState('');
   const [codCollected, setCodCollected] = useState(false);
@@ -41,6 +44,9 @@ export default function DeliveryApp() {
         d => d.status === 'ASSIGNED' || d.status === 'PICKED_UP' || d.status === 'IN_TRANSIT'
       );
       setActiveDelivery(inProgress || null);
+      if (inProgress?.currentLat && inProgress?.currentLng) {
+        setRiderPos([inProgress.currentLat, inProgress.currentLng]);
+      }
     } catch (err) {
       console.error(err);
     }
@@ -48,9 +54,37 @@ export default function DeliveryApp() {
 
   useEffect(() => {
     loadData();
-    const interval = setInterval(loadData, 8000);
-    return () => clearInterval(interval);
+
+    // Listen to real-time available pickup broadcasts
+    const unsubPickups = subscribeToTopic('/topic/delivery/available-pickups', (msg) => {
+      setActionSuccess(`New pickup available: Order #${msg.orderNumber || msg.orderId || ''}`);
+      loadData();
+    });
+
+    return () => {
+      if (unsubPickups) unsubPickups();
+    };
   }, []);
+
+  const handlePushGpsLocation = async () => {
+    if (!activeDelivery) return;
+    try {
+      const destLat = activeDelivery.deliveryLat || 12.9304;
+      const destLng = activeDelivery.deliveryLng || 77.6784;
+      // Interpolate rider closer to destination
+      const nextLat = Math.round(((riderPos[0] + destLat) / 2) * 10000) / 10000;
+      const nextLng = Math.round(((riderPos[1] + destLng) / 2) * 10000) / 10000;
+      setRiderPos([nextLat, nextLng]);
+
+      await api.post(`/delivery/${activeDelivery.id}/location`, {
+        latitude: nextLat,
+        longitude: nextLng
+      });
+      setActionSuccess(`Live GPS updated (${nextLat}, ${nextLng}) and transmitted to customer.`);
+    } catch (err) {
+      setError(err.response?.data?.message || err.message || 'GPS transmission failed');
+    }
+  };
 
   const handleAcceptOffer = async (deliveryId) => {
     setError('');
@@ -187,7 +221,7 @@ export default function DeliveryApp() {
             <TrackingMap 
               pharmacyPos={[12.9716, 77.5946]}
               customerPos={[activeDelivery.deliveryLat || 12.9304, activeDelivery.deliveryLng || 77.6784]}
-              riderPos={[12.9510, 77.6365]}
+              riderPos={riderPos}
               status={activeDelivery.status}
             />
           </div>
@@ -198,7 +232,7 @@ export default function DeliveryApp() {
               <MapPin className="w-4 h-4 text-brand shrink-0 mt-0.5" />
               <div>
                 <strong>Destination Address:</strong>
-                <div className="text-neutral-700">Bellandur, Outer Ring Road, Bengaluru</div>
+                <div className="text-neutral-700">{activeDelivery.deliveryAddressSnapshot || 'Customer Address, Bengaluru'}</div>
               </div>
             </div>
 
@@ -247,9 +281,29 @@ export default function DeliveryApp() {
             </div>
           )}
 
-          {/* STEP 3: Delivery OTP Verification at Doorstep */}
+          {/* STEP 3: Delivery OTP Verification at Doorstep & GPS Stream */}
           {activeDelivery.status === 'IN_TRANSIT' && (
-            <div className="space-y-3 pt-2">
+            <div className="space-y-4 pt-2">
+              {/* GPS Location Streamer */}
+              <div className="p-3 bg-brand-tint/30 border border-teal-200 rounded-control space-y-2">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-semibold text-brand flex items-center gap-1.5">
+                    <Radio className="w-3.5 h-3.5 animate-pulse text-brand" /> Live GPS Transceiver
+                  </span>
+                  <span className="font-mono-numbers text-[10px] text-neutral-600">
+                    {riderPos[0].toFixed(4)}, {riderPos[1].toFixed(4)}
+                  </span>
+                </div>
+                <Button 
+                  size="sm" 
+                  variant="secondary"
+                  className="w-full text-xs" 
+                  onClick={handlePushGpsLocation}
+                >
+                  📡 Stream Current GPS Position to Customer
+                </Button>
+              </div>
+
               <label className="block text-xs font-semibold text-neutral-800">
                 Step 3: Enter Customer's 4-Digit Delivery OTP
               </label>

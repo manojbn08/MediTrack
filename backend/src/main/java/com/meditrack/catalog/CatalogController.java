@@ -33,6 +33,12 @@ public class CatalogController {
         return ResponseEntity.ok(ApiResponse.ok(productMapper.toDto(product)));
     }
 
+    @GetMapping("/products/{id}/substitutes")
+    public ResponseEntity<ApiResponse<List<com.meditrack.catalog.dto.ProductResponseDto>>> getSubstitutes(@PathVariable Long id) {
+        List<Product> substitutes = catalogService.getSubstitutes(id);
+        return ResponseEntity.ok(ApiResponse.ok(productMapper.toDtoList(substitutes)));
+    }
+
     @GetMapping("/categories")
     public ResponseEntity<ApiResponse<List<Category>>> getCategories() {
         List<Category> categories = catalogService.getCategories();

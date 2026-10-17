@@ -1,7 +1,9 @@
 package com.meditrack.order;
 
 import com.meditrack.common.ApiResponse;
+import com.meditrack.common.BusinessException;
 import com.meditrack.security.UserPrincipal;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
@@ -14,9 +16,11 @@ import java.util.Map;
 public class PharmacistOrderController {
 
     private final OrderService orderService;
+    private final OrderReturnRepository orderReturnRepository;
 
-    public PharmacistOrderController(OrderService orderService) {
+    public PharmacistOrderController(OrderService orderService, OrderReturnRepository orderReturnRepository) {
         this.orderService = orderService;
+        this.orderReturnRepository = orderReturnRepository;
     }
 
     @GetMapping
@@ -74,5 +78,43 @@ public class PharmacistOrderController {
         String pickupCode = body.get("pickupCode");
         Order order = orderService.pharmacistVerifyAndDeliverPickup(orderNumber, pickupCode, principal.getId());
         return ResponseEntity.ok(ApiResponse.ok("Pickup verified and order marked as DELIVERED", order));
+    }
+
+    @GetMapping("/returns")
+    public ResponseEntity<ApiResponse<List<OrderReturn>>> getPendingReturns() {
+        List<OrderReturn> returns = orderReturnRepository.findByStatusOrderByCreatedAtAsc(OrderReturn.ReturnStatus.PENDING_INSPECTION);
+        return ResponseEntity.ok(ApiResponse.ok(returns));
+    }
+
+    @PostMapping("/returns/{id}/approve")
+    public ResponseEntity<ApiResponse<OrderReturn>> approveReturn(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @PathVariable Long id,
+            @RequestBody(required = false) Map<String, String> body) {
+        OrderReturn ret = orderReturnRepository.findById(id)
+                .orElseThrow(() -> new BusinessException("Return request not found", HttpStatus.NOT_FOUND));
+
+        ret.setStatus(OrderReturn.ReturnStatus.APPROVED_REFUNDED);
+        ret.setInspectedByPharmacistId(principal.getId());
+        ret.setPharmacistNotes(body != null ? body.get("notes") : "Inspected and approved for refund");
+        orderReturnRepository.save(ret);
+
+        return ResponseEntity.ok(ApiResponse.ok("Return approved and refund processed", ret));
+    }
+
+    @PostMapping("/returns/{id}/reject")
+    public ResponseEntity<ApiResponse<OrderReturn>> rejectReturn(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @PathVariable Long id,
+            @RequestBody(required = false) Map<String, String> body) {
+        OrderReturn ret = orderReturnRepository.findById(id)
+                .orElseThrow(() -> new BusinessException("Return request not found", HttpStatus.NOT_FOUND));
+
+        ret.setStatus(OrderReturn.ReturnStatus.REJECTED);
+        ret.setInspectedByPharmacistId(principal.getId());
+        ret.setPharmacistNotes(body != null ? body.getOrDefault("reason", "Seal broken or item not eligible") : "Item not eligible");
+        orderReturnRepository.save(ret);
+
+        return ResponseEntity.ok(ApiResponse.ok("Return rejected", ret));
     }
 }
