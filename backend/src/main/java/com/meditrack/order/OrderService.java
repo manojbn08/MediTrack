@@ -18,6 +18,12 @@ import com.meditrack.prescription.PrescriptionStatus;
 import com.meditrack.user.User;
 import com.meditrack.user.UserRepository;
 import com.meditrack.notification.EmailService;
+import com.meditrack.config.RabbitMqConfig;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.amqp.rabbit.core.RabbitTemplate;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -28,6 +34,8 @@ import java.util.*;
 
 @Service
 public class OrderService {
+
+    private static final Logger log = LoggerFactory.getLogger(OrderService.class);
 
     private final OrderRepository orderRepository;
     private final OrderItemRepository orderItemRepository;
@@ -40,6 +48,12 @@ public class OrderService {
     private final DeliveryRepository deliveryRepository;
     private final EmailService emailService;
     private final RealtimeTrackingService realtimeTrackingService;
+
+    @Autowired(required = false)
+    private RabbitTemplate rabbitTemplate;
+
+    @Value("${meditrack.rabbitmq.enabled:false}")
+    private boolean rabbitMqEnabled;
 
     public OrderService(OrderRepository orderRepository,
                         OrderItemRepository orderItemRepository,
@@ -151,8 +165,8 @@ public class OrderService {
         order.setPickupCode(pickupCode);
         order.setDeliveryOtp(deliveryOtp);
 
-        OrderStatus initialStatus = hasRx ? OrderStatus.PRESCRIPTION_PENDING : OrderStatus.CONFIRMED;
-        order.setStatus(initialStatus);
+        OrderStatus targetStatus = hasRx ? OrderStatus.PRESCRIPTION_PENDING : OrderStatus.CONFIRMED;
+        order.setStatus(OrderStatus.PLACED);
 
         order = orderRepository.save(order);
 
@@ -177,7 +191,7 @@ public class OrderService {
         }
 
         // Record Initial history
-        orderStateMachine.transition(order, initialStatus, "CUSTOMER", "Order placed successfully");
+        orderStateMachine.transition(order, targetStatus, "CUSTOMER", "Order placed successfully");
 
         // Record Payment
         Payment payment = new Payment();
@@ -197,9 +211,33 @@ public class OrderService {
         // Clear cart
         cartService.clearCart(customerId);
 
-        // Asynchronously dispatch email notification
-        if (user.getEmail() != null && !user.getEmail().isBlank()) {
-            emailService.sendOrderConfirmation(order, user.getEmail());
+        // Asynchronous post-checkout processing: RabbitMQ queue (DLQ backed) or fallback
+        if (rabbitMqEnabled && rabbitTemplate != null) {
+            try {
+                OrderPlacedEvent event = new OrderPlacedEvent(
+                        order.getId(),
+                        order.getOrderNumber(),
+                        order.getCustomerId(),
+                        user.getEmail(),
+                        user.getFullName(),
+                        order.getTotalAmount(),
+                        order.getStatus().name(),
+                        order.getPlacedAt()
+                );
+                rabbitTemplate.convertAndSend(RabbitMqConfig.ORDER_EXCHANGE, RabbitMqConfig.ORDER_PLACED_KEY, event);
+                log.info("[RABBITMQ PRODUCER] Published OrderPlacedEvent for Order #{} to exchange {}",
+                        order.getOrderNumber(), RabbitMqConfig.ORDER_EXCHANGE);
+            } catch (Exception ex) {
+                log.error("[RABBITMQ PRODUCER ERROR] Failed publishing to exchange: {}. Falling back to direct email.", ex.getMessage());
+                if (user.getEmail() != null && !user.getEmail().isBlank()) {
+                    emailService.sendOrderConfirmation(order, user.getEmail());
+                }
+            }
+        } else {
+            // Direct asynchronous fallback when RabbitMQ is disabled
+            if (user.getEmail() != null && !user.getEmail().isBlank()) {
+                emailService.sendOrderConfirmation(order, user.getEmail());
+            }
         }
 
         // Broadcast real-time order status via STOMP WebSocket

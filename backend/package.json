@@ -1,0 +1,12 @@
+{
+  "name": "meditrack-backend",
+  "version": "1.0.0",
+  "description": "MediTrack Backend - Spring Boot Service",
+  "private": true,
+  "scripts": {
+    "dev": "mvn spring-boot:run",
+    "start": "mvn spring-boot:run",
+    "build": "mvn clean package -DskipTests",
+    "test": "mvn test"
+  }
+}

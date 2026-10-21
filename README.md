@@ -90,7 +90,8 @@ The backend runs automatically with **Zero-Configuration** out-of-the-box (using
 
 ```bash
 cd backend
-mvn spring-boot:run
+npm run dev
+# or: mvn spring-boot:run
 ```
 
 *(Alternatively, to run against a local MySQL server, activate the mysql profile:*

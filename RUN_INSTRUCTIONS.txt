@@ -1,0 +1,173 @@
+================================================================================
+                    MEDITRACK - HOW TO RUN THE PROJECT
+================================================================================
+Project: MediTrack Drug Store Management and Doorstep Delivery System
+Stack  : Java 21, Spring Boot 3.3.4, MySQL 8.0, React 18 (Vite), Nginx, Mailpit
+================================================================================
+
+TABLE OF CONTENTS
+-----------------
+1. Prerequisites & Environment
+2. Method 1: Local Windows Run (Recommended for Development)
+3. Method 2: Docker Compose Run (All-in-One Containerized)
+4. Default Demo Accounts & Logins
+5. Key URLs & Endpoints
+6. Common Troubleshooting
+
+================================================================================
+1. PREREQUISITES & ENVIRONMENT
+================================================================================
+Ensure the following tools are installed on your machine:
+- Java JDK 21+ (`java -version`)
+- Node.js 18+ and npm (`node -v` / `npm -v`)
+- MySQL 8.0 (`C:\Program Files\MySQL\MySQL Server 8.0\bin\mysql.exe`)
+  * Database name : meditrack (already created)
+  * Username      : root
+  * Password      : root
+- (Optional) Docker Desktop (if using containerized deployment)
+
+================================================================================
+2. METHOD 1: LOCAL WINDOWS RUN (STEP-BY-STEP)
+================================================================================
+
+STEP 1: Start MySQL Database
+----------------------------
+Ensure your local MySQL 8.0 service is running on port 3306.
+If you need to verify or start the MySQL service:
+  Open Services (services.msc) -> Start "MySQL80" service.
+The database 'meditrack' with user 'root' / password 'root' is already prepared.
+
+
+STEP 2: Start Mailpit (Email Verification & OTP Catcher)
+--------------------------------------------------------
+Mailpit is a lightweight local email server that intercepts all outgoing 
+registration OTPs, order receipts, and delivery codes without needing real SMTP.
+
+  Simply double-click:
+    d:\MediTrack\mailpit\start-mailpit.bat
+
+  * SMTP Port : localhost:1025
+  * Web Inbox : http://localhost:8025 (opens automatically in your browser)
+  To stop later: double-click d:\MediTrack\mailpit\stop-mailpit.bat
+
+
+STEP 3: Start Nginx Load Balancer (Port 80)
+------------------------------------------
+Your local Nginx server (C:\nginx-1.30.5) is configured to balance traffic across
+backend instances, handle WebSockets (/ws/), and proxy the frontend.
+
+  Simply double-click:
+    d:\MediTrack\nginx\start-nginx.bat
+
+  To stop later: double-click d:\MediTrack\nginx\stop-nginx.bat
+
+
+STEP 4: Start Backend Instance 1 (Primary - Port 8080)
+------------------------------------------------------
+Open PowerShell / Command Prompt:
+  cd d:\MediTrack\backend
+  mvn spring-boot:run -Dspring-boot.run.profiles=mysql
+
+Wait until you see:
+  "Started MeditrackApplication in ... seconds (process running for ...)"
+Backend Node 1 is now running on http://localhost:8080.
+
+
+STEP 5 (Optional): Start Backend Instance 2 (Load Balanced - Port 8081)
+-----------------------------------------------------------------------
+To test multi-node load balancing through Nginx, open a second terminal:
+  cd d:\MediTrack\backend
+  mvn spring-boot:run -Dspring-boot.run.profiles=mysql -Dspring-boot.run.arguments="--server.port=8081"
+
+Backend Node 2 is now running on http://localhost:8081.
+Nginx automatically balances traffic across Node 1 and Node 2 using least_conn.
+
+
+STEP 6: Start Frontend (React + Vite)
+-------------------------------------
+Open another terminal:
+  cd d:\MediTrack\frontend
+  npm install        (run once to install dependencies)
+  npm run dev
+
+Vite dev server will start at http://localhost:5173.
+
+
+STEP 7: Open the Application in Your Browser
+--------------------------------------------
+- Main Application (via Nginx Load Balancer): http://localhost
+- Or Direct Vite Dev Server                 : http://localhost:5173
+- Mailpit Web Inbox (OTP emails)            : http://localhost:8025
+- Swagger API Documentation                 : http://localhost:8080/swagger-ui.html
+
+================================================================================
+3. METHOD 2: DOCKER COMPOSE RUN (CONTAINERIZED)
+================================================================================
+If Docker Desktop is running, you can launch the complete ecosystem with one command:
+
+  cd d:\MediTrack
+  docker compose up --build
+
+This starts:
+  - meditrack-mysql      (Port 3306)
+  - meditrack-mailpit    (Port 1025 SMTP, Port 8025 Web Inbox)
+  - meditrack-rabbitmq   (Port 5672 AMQP, Port 15672 Web UI, Port 61613 STOMP Relay)
+  - meditrack-backend-1  (Port 8081)
+  - meditrack-backend-2  (Port 8082)
+  - meditrack-frontend   (Port 3000, Nginx serving SPA & load balancing backends)
+
+Access the app at: http://localhost:3000
+RabbitMQ Dashboard: http://localhost:15672 (guest / guest)
+
+To stop:
+  docker compose down
+
+================================================================================
+4. DEFAULT DEMO ACCOUNTS & ROLES
+================================================================================
+You can log in at http://localhost/login using these pre-seeded roles:
+
+| Role             | Email Address               | Password    | Portal / Features              |
+|------------------|-----------------------------|-------------|--------------------------------|
+| Admin            | admin@meditrack.com         | Admin@123   | User Management, Audit Logs    |
+| Pharmacist       | pharmacist@meditrack.com    | Pharm@123   | Prescription Approval, Batches |
+| Delivery Driver  | driver@meditrack.com        | Driver@123  | Live GPS Dispatch & OTP Entry  |
+| Customer         | customer@example.com        | Customer@123| Medicine Ordering & Tracking   |
+
+New Customer Registration:
+  Go to http://localhost/register.
+  Enter your details and email.
+  A 6-digit OTP will be dispatched via Angus Mail -> check http://localhost:8025.
+  Enter the OTP to activate your account.
+
+================================================================================
+5. KEY URLS & ENDPOINTS REFERENCE
+================================================================================
+- Frontend App (Nginx Load Balancer): http://localhost
+- Frontend App (Vite Dev Server)   : http://localhost:5173
+- Backend Swagger OpenAPI          : http://localhost:8080/swagger-ui.html
+- Backend Actuator Health Check    : http://localhost:8080/actuator/health
+- Mailpit Web Inbox (Email OTPs)   : http://localhost:8025
+- Local MySQL Host                 : localhost:3306 (DB: meditrack)
+
+================================================================================
+6. COMMON TROUBLESHOOTING
+================================================================================
+Q: Port 80 already in use when running start-nginx.bat?
+A: Check if IIS or Skype or another web server is on port 80:
+   netstat -ano | findstr :80
+   You can either stop the competing process or change 'listen 80;' in
+   d:\MediTrack\nginx\nginx.conf to another port like 'listen 8000;'.
+
+Q: Cannot connect to MySQL on localhost:3306?
+A: Ensure the MySQL80 Windows Service is running:
+   In Windows search, type "services.msc", locate MySQL80, and click "Start".
+
+Q: Where do uploaded prescriptions go?
+A: Uploads are stored in 'd:\MediTrack\backend\uploads'.
+   Nginx automatically forwards requests from '/uploads/*' to the backend.
+
+Q: How do I stop all background batch services?
+A: Run 'd:\MediTrack\mailpit\stop-mailpit.bat' and
+   'd:\MediTrack\nginx\stop-nginx.bat'.
+================================================================================

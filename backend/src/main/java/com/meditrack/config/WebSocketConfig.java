@@ -40,7 +40,9 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
                     .setClientLogin(rabbitMqUsername)
                     .setClientPasscode(rabbitMqPassword)
                     .setSystemLogin(rabbitMqUsername)
-                    .setSystemPasscode(rabbitMqPassword);
+                    .setSystemPasscode(rabbitMqPassword)
+                    .setSystemHeartbeatReceiveInterval(10000)
+                    .setSystemHeartbeatSendInterval(10000);
         } else {
             log.info("[WEBSOCKET] Enabling In-Memory SimpleBroker (/topic, /queue)");
             config.enableSimpleBroker("/topic", "/queue");

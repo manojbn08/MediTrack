@@ -17,17 +17,53 @@ services:
       timeout: 10s
       retries: 5
 
-  backend:
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: meditrack-mailpit
+    restart: always
+    ports:
+      - "1025:1025"   # SMTP port
+      - "8025:8025"   # Web UI port
+    environment:
+      MP_MAX_MESSAGES: 5000
+      MP_SMTP_AUTH_ACCEPT_ANY: 1
+      MP_ALLOW_UNENCRYPTED_AUTH: 1
+
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    container_name: meditrack-rabbitmq
+    restart: always
+    ports:
+      - "5672:5672"     # AMQP Protocol
+      - "15672:15672"   # Management Web UI (guest / guest)
+      - "61613:61613"   # STOMP Broker Relay (for Spring WebSocket)
+      - "15674:15674"   # Web-STOMP (WebSocket directly to RabbitMQ)
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    command: >
+      sh -c "rabbitmq-plugins enable --offline rabbitmq_stomp rabbitmq_web_stomp rabbitmq_management && rabbitmq-server"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+
+  backend-1:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    container_name: meditrack-backend
+    container_name: meditrack-backend-1
     restart: always
     depends_on:
       mysql:
         condition: service_healthy
+      mailpit:
+        condition: service_started
+      rabbitmq:
+        condition: service_healthy
     ports:
-      - "8080:8080"
+      - "8081:8080"
     environment:
       SPRING_PROFILES_ACTIVE: mysql
       DB_HOST: mysql
@@ -36,6 +72,50 @@ services:
       DB_USER: root
       DB_PASS: root
       JWT_SECRET: 404E635266556A586E3272357538782F413F4428472B4B6250645367566B5970
+      SPRING_MAIL_HOST: mailpit
+      SPRING_MAIL_PORT: 1025
+      MEDITRACK_MAIL_ENABLED: "true"
+      MEDITRACK_RABBITMQ_ENABLED: "true"
+      MEDITRACK_RABBITMQ_HOST: rabbitmq
+      MEDITRACK_RABBITMQ_PORT: 5672
+      MEDITRACK_RABBITMQ_STOMP_PORT: 61613
+      MEDITRACK_RABBITMQ_USERNAME: guest
+      MEDITRACK_RABBITMQ_PASSWORD: guest
+    volumes:
+      - uploads_data:/app/uploads
+
+  backend-2:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: meditrack-backend-2
+    restart: always
+    depends_on:
+      mysql:
+        condition: service_healthy
+      mailpit:
+        condition: service_started
+      rabbitmq:
+        condition: service_healthy
+    ports:
+      - "8082:8080"
+    environment:
+      SPRING_PROFILES_ACTIVE: mysql
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_NAME: meditrack
+      DB_USER: root
+      DB_PASS: root
+      JWT_SECRET: 404E635266556A586E3272357538782F413F4428472B4B6250645367566B5970
+      SPRING_MAIL_HOST: mailpit
+      SPRING_MAIL_PORT: 1025
+      MEDITRACK_MAIL_ENABLED: "true"
+      MEDITRACK_RABBITMQ_ENABLED: "true"
+      MEDITRACK_RABBITMQ_HOST: rabbitmq
+      MEDITRACK_RABBITMQ_PORT: 5672
+      MEDITRACK_RABBITMQ_STOMP_PORT: 61613
+      MEDITRACK_RABBITMQ_USERNAME: guest
+      MEDITRACK_RABBITMQ_PASSWORD: guest
     volumes:
       - uploads_data:/app/uploads
 
@@ -46,7 +126,8 @@ services:
     container_name: meditrack-frontend
     restart: always
     depends_on:
-      - backend
+      - backend-1
+      - backend-2
     ports:
       - "3000:80"
 

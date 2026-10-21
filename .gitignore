@@ -4,12 +4,13 @@
 .env.*.local
 *.env
 
-# Java / Maven
+# Java / Maven / Binaries
 **/target/
 *.class
 *.jar
 *.war
 *.ear
+*.exe
 .mvn/
 hs_err_pid*
 
@@ -37,3 +38,7 @@ Thumbs.db
 
 # System generated / Antigravity logs
 .system_generated/
+
+# Root markdown files (except README.md)
+/*.md
+!/README.md
