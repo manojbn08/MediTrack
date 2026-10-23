@@ -44,7 +44,13 @@ public class ProductBatch {
     @Column(length = 20)
     private BatchStatus status = BatchStatus.ACTIVE;
 
+    @Version
+    private Long version;
+
     public ProductBatch() {}
+
+    public Long getVersion() { return version; }
+    public void setVersion(Long version) { this.version = version; }
 
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }

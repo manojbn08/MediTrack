@@ -9,8 +9,8 @@ export function getWebSocketClient() {
     return stompClient;
   }
 
-  const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8080/api';
-  const baseUrl = apiUrl.replace(/\/api\/?$/, '');
+  const apiUrl = import.meta.env.VITE_API_URL || (typeof window !== 'undefined' && window.location.port === '5173' ? 'http://localhost:8080/api' : '/api');
+  const baseUrl = apiUrl.startsWith('http') ? apiUrl.replace(/\/api\/?$/, '') : (typeof window !== 'undefined' ? window.location.origin : 'http://localhost:8080');
   const socketUrl = `${baseUrl}/ws`;
 
   stompClient = new Client({

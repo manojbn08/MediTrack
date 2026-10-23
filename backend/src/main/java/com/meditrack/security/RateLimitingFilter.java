@@ -23,6 +23,7 @@ public class RateLimitingFilter extends OncePerRequestFilter {
 
     private final Map<String, Bucket> loginBuckets = new ConcurrentHashMap<>();
     private final Map<String, Bucket> registerBuckets = new ConcurrentHashMap<>();
+    private final Map<String, Bucket> otpBuckets = new ConcurrentHashMap<>();
 
     private Bucket createLoginBucket() {
         // 5 requests per minute per IP
@@ -38,6 +39,15 @@ public class RateLimitingFilter extends OncePerRequestFilter {
         Bandwidth limit = Bandwidth.builder()
                 .capacity(3)
                 .refillGreedy(3, Duration.ofMinutes(10))
+                .build();
+        return Bucket.builder().addLimit(limit).build();
+    }
+
+    private Bucket createOtpBucket() {
+        // 10 requests per minute per IP
+        Bandwidth limit = Bandwidth.builder()
+                .capacity(10)
+                .refillGreedy(10, Duration.ofMinutes(1))
                 .build();
         return Bucket.builder().addLimit(limit).build();
     }
@@ -60,6 +70,12 @@ public class RateLimitingFilter extends OncePerRequestFilter {
             Bucket bucket = registerBuckets.computeIfAbsent(clientIp, k -> createRegisterBucket());
             if (!bucket.tryConsume(1)) {
                 sendRateLimitError(response, "Too many registration attempts from this IP. Please try again later.");
+                return;
+            }
+        } else if (path.startsWith("/api/auth/verify-otp")) {
+            Bucket bucket = otpBuckets.computeIfAbsent(clientIp, k -> createOtpBucket());
+            if (!bucket.tryConsume(1)) {
+                sendRateLimitError(response, "Too many OTP verification attempts. Please wait 60 seconds before trying again.");
                 return;
             }
         }

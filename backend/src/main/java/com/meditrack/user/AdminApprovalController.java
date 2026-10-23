@@ -101,6 +101,16 @@ public class AdminApprovalController {
                 + "</body></html>"
         );
 
+        auditLogService.logAction(
+                userId,
+                "ROLE_ADMIN",
+                "APPROVE_USER",
+                "USER",
+                user.getId(),
+                "Admin approved user application for: " + user.getFullName() + " (" + user.getEmail() + ")",
+                "127.0.0.1"
+        );
+
         return ResponseEntity.ok(ApiResponse.ok("User approved successfully", null));
     }
 
@@ -130,6 +140,16 @@ public class AdminApprovalController {
                 + "<p><strong>" + reason + "</strong></p>"
                 + "<p>Please contact support for further clarification.</p>"
                 + "</body></html>"
+        );
+
+        auditLogService.logAction(
+                userId,
+                "ROLE_ADMIN",
+                "REJECT_USER",
+                "USER",
+                user.getId(),
+                "Admin rejected user application for: " + user.getFullName() + ". Reason: " + reason,
+                "127.0.0.1"
         );
 
         return ResponseEntity.ok(ApiResponse.ok("User application rejected", null));

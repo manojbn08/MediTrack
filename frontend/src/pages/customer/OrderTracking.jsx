@@ -18,7 +18,7 @@ import {
   FileText,
   Download,
   RotateCcw,
-  AlertCircle
+  Loader2
 } from 'lucide-react';
 
 function calculateRoadDistance(lat1, lon1, lat2, lon2) {
@@ -41,10 +41,12 @@ export default function OrderTracking() {
   const [riderPos, setRiderPos] = useState([12.9650, 77.6000]);
   const [etaMinutes, setEtaMinutes] = useState(null);
   const [remainingKm, setRemainingKm] = useState(null);
+  const [downloadingInvoice, setDownloadingInvoice] = useState(false);
   const [showReturnModal, setShowReturnModal] = useState(false);
   const [returnReason, setReturnReason] = useState('');
   const [returnSubmitting, setReturnSubmitting] = useState(false);
   const [returnSuccessMsg, setReturnSuccessMsg] = useState('');
+  const [toastMsg, setToastMsg] = useState('');
 
   const [confirmDialog, setConfirmDialog] = useState({
     isOpen: false,
@@ -86,7 +88,7 @@ export default function OrderTracking() {
 
     fetchOrderAndDelivery();
 
-    // Subscribe to real-time status and live GPS location via WebSocket
+    // Subscribe to real-time status and live GPS location via STOMP WebSocket
     const unsubStatus = subscribeToTopic(`/topic/orders/${id}/status`, (msg) => {
       setOrder(prev => prev ? { ...prev, ...msg, status: msg.status || prev.status } : msg);
       if (msg?.etaMinutes != null) {
@@ -95,7 +97,9 @@ export default function OrderTracking() {
     });
 
     const unsubLoc = subscribeToTopic(`/topic/orders/${id}/location`, (loc) => {
-      if (loc?.currentLat && loc?.currentLng) {
+      if (loc?.latitude && loc?.longitude) {
+        setRiderPos([loc.latitude, loc.longitude]);
+      } else if (loc?.currentLat && loc?.currentLng) {
         setRiderPos([loc.currentLat, loc.currentLng]);
       } else if (loc?.lat && loc?.lng) {
         setRiderPos([loc.lat, loc.lng]);
@@ -113,6 +117,104 @@ export default function OrderTracking() {
       if (unsubLoc) unsubLoc();
     };
   }, [id]);
+
+  // Clean PDF Invoice Download
+  const handleDownloadInvoice = async () => {
+    setDownloadingInvoice(true);
+    try {
+      const token = localStorage.getItem('meditrack_token');
+      const baseUrl = import.meta.env.VITE_API_URL || (window.location.port === '5173' ? 'http://localhost:8080/api' : '/api');
+      
+      // Request PDF invoice from /api/orders/{id}/invoice
+      let response = await fetch(`${baseUrl}/orders/${id}/invoice`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+
+      if (!response.ok) {
+        // Fallback to customer namespace
+        response = await fetch(`${baseUrl}/customer/orders/${id}/invoice`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+      }
+
+      if (!response.ok) {
+        throw new Error('Invoice PDF is not available yet');
+      }
+
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `MediTrack-Invoice-${order?.orderNumber || id}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => window.URL.revokeObjectURL(url), 1000);
+
+      setToastMsg(`GST Tax Invoice INV-${order?.orderNumber || id} downloaded successfully.`);
+      setTimeout(() => setToastMsg(''), 4000);
+    } catch (err) {
+      alert(err.message || 'Invoice download failed');
+    } finally {
+      setDownloadingInvoice(false);
+    }
+  };
+
+  const promptCancelOrder = () => {
+    setConfirmDialog({
+      isOpen: true,
+      title: `Cancel Order: ${order.orderNumber}`,
+      message: `Are you sure you want to cancel this order? Any reserved medicine batch inventory will be released back to pharmacy stock.`,
+      confirmText: 'Yes, Cancel Order',
+      cancelText: 'Keep Order',
+      variant: 'danger',
+      onConfirm: executeCancelOrder,
+    });
+  };
+
+  const executeCancelOrder = async () => {
+    setConfirmDialog(prev => ({ ...prev, isOpen: false }));
+    try {
+      await api.post(`/customer/orders/${id}/cancel`, { reason: 'Customer requested cancellation' });
+      const orderRes = await api.get(`/customer/orders/${id}`);
+      setOrder(orderRes.data);
+      setReturnSuccessMsg('Order has been successfully cancelled.');
+    } catch (err) {
+      alert(err.response?.data?.message || err.message || 'Failed to cancel order');
+    }
+  };
+
+  const promptSubmitReturn = (e) => {
+    e.preventDefault();
+    if (!returnReason.trim()) return;
+    setConfirmDialog({
+      isOpen: true,
+      title: `Submit Return Request: Order ${order.orderNumber}`,
+      message: `Confirm submitting return request for reason: "${returnReason}"? In compliance with CDSCO guidelines, unbroken tamper seal must be verified by a pharmacist before refund is processed.`,
+      confirmText: 'Confirm & Submit',
+      cancelText: 'Cancel',
+      variant: 'primary',
+      onConfirm: executeRequestReturn,
+    });
+  };
+
+  const executeRequestReturn = async () => {
+    setConfirmDialog(prev => ({ ...prev, isOpen: false }));
+    setReturnSubmitting(true);
+    try {
+      await api.post(`/customer/orders/${id}/returns`, {
+        reason: returnReason,
+        condition: 'UNOPENED'
+      });
+      setReturnSuccessMsg('Return request submitted for pharmacist quality review.');
+      setShowReturnModal(false);
+      setReturnReason('');
+    } catch (err) {
+      alert(err.response?.data?.message || err.message || 'Failed to submit return');
+    } finally {
+      setReturnSubmitting(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -175,86 +277,11 @@ export default function OrderTracking() {
     return 'pending';
   };
 
-  const handleDownloadInvoice = async () => {
-    try {
-      const token = localStorage.getItem('meditrack_token');
-      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:8080/api'}/customer/orders/${id}/invoice`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      if (!response.ok) throw new Error('Invoice PDF is not available yet');
-      const blob = await response.blob();
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `Invoice-${order.orderNumber}.pdf`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-    } catch (err) {
-      alert(err.message || 'Invoice download failed');
-    }
-  };
-
-  const promptCancelOrder = () => {
-    setConfirmDialog({
-      isOpen: true,
-      title: `Cancel Order: ${order.orderNumber}`,
-      message: `Are you sure you want to cancel this order? Any reserved medicine batch inventory will be released back to pharmacy stock.`,
-      confirmText: 'Yes, Cancel Order',
-      cancelText: 'Keep Order',
-      variant: 'danger',
-      onConfirm: executeCancelOrder,
-    });
-  };
-
-  const executeCancelOrder = async () => {
-    setConfirmDialog(prev => ({ ...prev, isOpen: false }));
-    try {
-      await api.post(`/customer/orders/${id}/cancel`, { reason: 'Customer requested cancellation' });
-      const orderRes = await api.get(`/customer/orders/${id}`);
-      setOrder(orderRes.data);
-      setReturnSuccessMsg('Order has been successfully cancelled.');
-    } catch (err) {
-      alert(err.response?.data?.message || err.message || 'Failed to cancel order');
-    }
-  };
-
-  const promptSubmitReturn = (e) => {
-    e.preventDefault();
-    if (!returnReason.trim()) return;
-    setConfirmDialog({
-      isOpen: true,
-      title: `Submit Return Request: Order ${order.orderNumber}`,
-      message: `Confirm submitting return request for reason: "${returnReason}"? In compliance with CDSCO guidelines, unbroken tamper seal must be verified by a pharmacist before refund is processed.`,
-      confirmText: 'Confirm & Submit',
-      cancelText: 'Cancel',
-      variant: 'primary',
-      onConfirm: executeRequestReturn,
-    });
-  };
-
-  const executeRequestReturn = async () => {
-    setConfirmDialog(prev => ({ ...prev, isOpen: false }));
-    setReturnSubmitting(true);
-    try {
-      await api.post(`/customer/orders/${id}/returns`, {
-        reason: returnReason,
-        condition: 'UNOPENED'
-      });
-      setReturnSuccessMsg('Return request submitted for pharmacist quality review.');
-      setShowReturnModal(false);
-      setReturnReason('');
-    } catch (err) {
-      alert(err.response?.data?.message || err.message || 'Failed to submit return');
-    } finally {
-      setReturnSubmitting(false);
-    }
-  };
-
   return (
     <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
       
-      <div className="flex items-center justify-between">
+      {/* Top action navigation */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <Link to="/customer/orders" className="text-xs text-neutral-600 hover:text-neutral-900 inline-flex items-center gap-1 font-medium">
           <ArrowLeft className="w-3.5 h-3.5" /> Back to My Orders
         </Link>
@@ -278,14 +305,38 @@ export default function OrderTracking() {
             </button>
           )}
 
+          {/* Clean Invoice Download Button */}
           <button
             onClick={handleDownloadInvoice}
-            className="text-xs font-medium px-3 py-1.5 rounded-control bg-brand text-white hover:bg-brand-pressed inline-flex items-center gap-1.5 shadow-sm"
+            disabled={downloadingInvoice}
+            className="text-xs font-medium px-3.5 py-1.5 rounded-control bg-brand text-white hover:bg-brand-pressed inline-flex items-center gap-1.5 shadow-sm transition-all disabled:opacity-50"
+            title="Download clean GST PDF invoice"
           >
-            <Download className="w-3.5 h-3.5" /> GST Invoice PDF
+            {downloadingInvoice ? (
+              <>
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                <span>Generating Invoice...</span>
+              </>
+            ) : (
+              <>
+                <Download className="w-3.5 h-3.5" />
+                <span>GST Invoice PDF</span>
+              </>
+            )}
           </button>
         </div>
       </div>
+
+      {/* Success Notification Banners */}
+      {toastMsg && (
+        <div className="p-3.5 bg-teal-50 border border-teal-200 text-brand-pressed text-xs rounded-control flex items-center justify-between shadow-sm">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-brand" />
+            <span className="font-medium">{toastMsg}</span>
+          </div>
+          <button onClick={() => setToastMsg('')} className="font-semibold text-xs text-brand hover:underline">Dismiss</button>
+        </div>
+      )}
 
       {returnSuccessMsg && (
         <div className="p-3.5 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs rounded-control flex items-center justify-between">
@@ -297,7 +348,7 @@ export default function OrderTracking() {
         </div>
       )}
 
-      {/* Header bar */}
+      {/* Header Bar */}
       <div className="bg-white rounded-panel border border-neutral-200 p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-sm">
         <div>
           <div className="flex items-center gap-3">
@@ -331,16 +382,17 @@ export default function OrderTracking() {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start">
         
-        {/* Left Column: Timeline & Live Map */}
+        {/* Left Column: Map & Timeline */}
         <div className="lg:col-span-2 space-y-6">
           
-          {/* Live Leaflet Map */}
+          {/* Live Delivery Tracking Map */}
           <div className="bg-white rounded-panel border border-neutral-200 p-5 space-y-3 shadow-sm">
             <div className="flex items-center justify-between">
               <h2 className="text-sm font-semibold text-neutral-900 flex items-center gap-2">
                 <MapPin className="w-4 h-4 text-brand" />
                 <span>Live Fulfillment & Delivery Map</span>
               </h2>
+
               <div>
                 {order.status === 'DELIVERED' ? (
                   <span className="text-xs font-semibold text-semantic-success bg-emerald-50 px-2.5 py-1 rounded border border-emerald-200">
@@ -362,14 +414,15 @@ export default function OrderTracking() {
               </div>
             </div>
 
+            {/* Standard Clean Map */}
             <TrackingMap 
               pharmacyPos={[12.9716, 77.5946]}
-              customerPos={[order.deliveryLat || 12.9304, order.deliveryLng || 77.6784]}
+              customerPos={[destLat, destLng]}
               riderPos={riderPos}
               status={order.status}
             />
 
-            <div className="text-[11px] text-neutral-500 flex items-center justify-between pt-1">
+            <div className="text-[11px] text-neutral-500 flex flex-col sm:flex-row sm:items-center justify-between gap-1 pt-1">
               <span><strong>Pharmacy Origin:</strong> Central Dispensing Hub (Brigade Rd)</span>
               <span><strong>Destination:</strong> {order.deliveryAddressSnapshot}</span>
             </div>
@@ -435,12 +488,14 @@ export default function OrderTracking() {
 
         </div>
 
-        {/* Right Column: Items & Batch Breakdown */}
+        {/* Right Column: Items, Batch Breakdown & Invoice Download */}
         <div className="bg-white rounded-panel border border-neutral-200 p-6 space-y-4 shadow-sm">
-          <h2 className="text-sm font-semibold text-neutral-900 border-b border-neutral-100 pb-3 flex items-center gap-2">
-            <Pill className="w-4 h-4 text-brand" />
-            <span>Medication Batch Allocations</span>
-          </h2>
+          <div className="flex items-center justify-between border-b border-neutral-100 pb-3">
+            <h2 className="text-sm font-semibold text-neutral-900 flex items-center gap-2">
+              <Pill className="w-4 h-4 text-brand" />
+              <span>Medication Batch Allocations</span>
+            </h2>
+          </div>
 
           <div className="divide-y divide-neutral-100 text-xs">
             {order.items?.map((item) => (
@@ -449,34 +504,27 @@ export default function OrderTracking() {
                   <span>{item.quantity}x {item.product.name}</span>
                   <span className="font-mono-numbers">₹{item.lineTotal.toFixed(2)}</span>
                 </div>
-
-                <div className="text-[11px] text-neutral-500 flex items-center justify-between">
-                  <span>{item.product.packSize}</span>
-                  {item.batchNumber ? (
-                    <span className="font-mono-numbers bg-neutral-100 px-1.5 py-0.5 rounded text-neutral-700">
-                      Batch: {item.batchNumber}
-                    </span>
-                  ) : (
-                    <span className="italic text-amber-700">Pending pick</span>
-                  )}
+                <div className="flex justify-between text-[11px] text-neutral-500 font-mono-numbers">
+                  <span>Batch: {item.batchNumber || 'Assigned on pick'}</span>
+                  <span>Exp: {item.batchExpiry ? new Date(item.batchExpiry).toLocaleDateString('en-IN', { month: 'short', year: 'numeric' }) : 'FEFO'}</span>
                 </div>
               </div>
             ))}
           </div>
 
-          <div className="border-t border-neutral-200 pt-3 space-y-1.5 text-xs">
+          <div className="border-t border-neutral-200 pt-3 space-y-2 text-xs">
             <div className="flex justify-between text-neutral-600">
-              <span>Subtotal:</span>
-              <span className="font-mono-numbers">₹{order.subtotal.toFixed(2)}</span>
+              <span>Items Total:</span>
+              <span className="font-mono-numbers">₹{order.totalAmount.toFixed(2)}</span>
             </div>
             <div className="flex justify-between text-neutral-600">
-              <span>Delivery Fee:</span>
-              <span className="font-mono-numbers">₹{order.deliveryFee.toFixed(2)}</span>
+              <span>Delivery Charges:</span>
+              <span className="font-mono-numbers text-semantic-success">FREE</span>
             </div>
-            {order.discountAmount > 0 && (
-              <div className="flex justify-between text-semantic-success">
-                <span>Discount ({order.couponCode}):</span>
-                <span className="font-mono-numbers">-₹{order.discountAmount.toFixed(2)}</span>
+            {order.hasRxItems && (
+              <div className="flex items-center gap-1.5 text-[11px] text-teal-700 bg-teal-50 p-2 rounded">
+                <ShieldCheck className="w-3.5 h-3.5 shrink-0" />
+                <span>Verified by Registered Pharmacist</span>
               </div>
             )}
             <div className="flex justify-between font-semibold text-sm text-neutral-900 pt-2 border-t border-neutral-100">
@@ -485,7 +533,37 @@ export default function OrderTracking() {
             </div>
           </div>
 
-          <div className="p-3 bg-neutral-50 rounded-control border border-neutral-200 text-[11px] text-neutral-600 space-y-1 mt-4">
+          {/* Quick Invoice Download Box */}
+          <div className="p-3.5 bg-neutral-50 rounded-control border border-neutral-200 space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold text-neutral-800 flex items-center gap-1.5">
+                <FileText className="w-3.5 h-3.5 text-brand" /> Tax Invoice
+              </span>
+              <span className="text-[10px] text-neutral-500 font-mono-numbers">INV-{order.orderNumber}</span>
+            </div>
+            <p className="text-[11px] text-neutral-500">
+              CDSCO compliant tax invoice with full GST breakdown, manufacturer batches & QR code.
+            </p>
+            <button
+              onClick={handleDownloadInvoice}
+              disabled={downloadingInvoice}
+              className="w-full text-xs font-semibold py-2 px-3 rounded-control bg-brand hover:bg-brand-pressed text-white flex items-center justify-center gap-2 transition-colors disabled:opacity-50"
+            >
+              {downloadingInvoice ? (
+                <>
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  <span>Preparing PDF...</span>
+                </>
+              ) : (
+                <>
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Download Clean PDF Invoice</span>
+                </>
+              )}
+            </button>
+          </div>
+
+          <div className="p-3 bg-neutral-50 rounded-control border border-neutral-200 text-[11px] text-neutral-600 space-y-1">
             <div className="font-semibold text-neutral-800">Delivery Instructions:</div>
             <div>Please keep exact cash ready if paying by COD. Handover 4-digit OTP to rider once package seal is verified.</div>
           </div>

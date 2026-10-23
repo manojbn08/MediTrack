@@ -15,7 +15,7 @@ import java.util.List;
 import java.util.Map;
 
 @RestController
-@RequestMapping("/api/customer/orders")
+@RequestMapping({"/api/customer/orders", "/api/orders"})
 public class CustomerOrderController {
 
     private final OrderService orderService;
@@ -67,7 +67,7 @@ public class CustomerOrderController {
         byte[] pdfBytes = invoicePdfService.generateInvoicePdf(order);
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_PDF);
-        headers.setContentDispositionFormData("inline", "invoice-" + order.getOrderNumber() + ".pdf");
+        headers.set(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"invoice-" + order.getOrderNumber() + ".pdf\"");
         headers.setContentLength(pdfBytes.length);
 
         return new ResponseEntity<>(pdfBytes, headers, HttpStatus.OK);
@@ -93,7 +93,7 @@ public class CustomerOrderController {
         return ResponseEntity.ok(ApiResponse.ok(response));
     }
 
-    @PostMapping("/{id}/return")
+    @PostMapping({"/{id}/return", "/{id}/returns"})
     public ResponseEntity<ApiResponse<OrderReturn>> requestReturn(
             @AuthenticationPrincipal UserPrincipal principal,
             @PathVariable Long id,

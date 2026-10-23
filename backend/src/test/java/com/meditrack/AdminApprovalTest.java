@@ -98,6 +98,7 @@ class AdminApprovalTest {
         verify(userRepository).save(pendingUser);
         verify(deliveryPartnerProfileRepository).save(dpProfile);
         verify(emailService).sendHtmlEmail(eq("suresh@fleet.com"), contains("Approved"), anyString());
+        verify(auditLogService).logAction(eq(25L), eq("ROLE_ADMIN"), eq("APPROVE_USER"), eq("USER"), eq(25L), anyString(), anyString());
     }
 
     @Test
@@ -121,5 +122,6 @@ class AdminApprovalTest {
         assertEquals(UserStatus.REJECTED, pendingUser.getStatus());
         verify(userRepository).save(pendingUser);
         verify(emailService).sendHtmlEmail(eq("vijay@fleet.com"), contains("Rejected"), contains("Driving license expired"));
+        verify(auditLogService).logAction(eq(30L), eq("ROLE_ADMIN"), eq("REJECT_USER"), eq("USER"), eq(30L), anyString(), anyString());
     }
 }

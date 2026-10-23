@@ -3,6 +3,10 @@ package com.meditrack.inventory;
 import com.meditrack.catalog.Product;
 import com.meditrack.catalog.ProductRepository;
 import com.meditrack.common.ApiResponse;
+import com.meditrack.order.OrderReturn;
+import com.meditrack.order.OrderReturnRepository;
+import com.meditrack.security.UserPrincipal;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -18,13 +22,16 @@ public class PharmacistInventoryController {
     private final ProductRepository productRepository;
     private final ProductBatchRepository batchRepository;
     private final InventoryService inventoryService;
+    private final OrderReturnRepository orderReturnRepository;
 
     public PharmacistInventoryController(ProductRepository productRepository,
                                          ProductBatchRepository batchRepository,
-                                         InventoryService inventoryService) {
+                                         InventoryService inventoryService,
+                                         OrderReturnRepository orderReturnRepository) {
         this.productRepository = productRepository;
         this.batchRepository = batchRepository;
         this.inventoryService = inventoryService;
+        this.orderReturnRepository = orderReturnRepository;
     }
 
     @GetMapping("/inventory")
@@ -76,5 +83,48 @@ public class PharmacistInventoryController {
                 .filter(p -> p.getStockAvailable() <= p.getReorderLevel())
                 .toList();
         return ResponseEntity.ok(ApiResponse.ok(products));
+    }
+
+    @GetMapping("/returns")
+    public ResponseEntity<com.meditrack.common.ApiResponse<List<OrderReturn>>> getPendingReturns() {
+        List<OrderReturn> returns = orderReturnRepository.findByStatusOrderByCreatedAtAsc(OrderReturn.ReturnStatus.PENDING_INSPECTION);
+        return ResponseEntity.ok(com.meditrack.common.ApiResponse.ok(returns));
+    }
+
+    @PostMapping({"/returns/{id}/inspect", "/returns/{id}/approve"})
+    public ResponseEntity<com.meditrack.common.ApiResponse<OrderReturn>> inspectReturn(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @PathVariable Long id,
+            @RequestBody(required = false) Map<String, String> body) {
+        OrderReturn ret = orderReturnRepository.findById(id)
+                .orElseThrow(() -> new com.meditrack.common.BusinessException("Return request not found", org.springframework.http.HttpStatus.NOT_FOUND));
+
+        String decision = body != null ? body.getOrDefault("decision", "APPROVED") : "APPROVED";
+        if ("REJECTED".equalsIgnoreCase(decision)) {
+            ret.setStatus(OrderReturn.ReturnStatus.REJECTED);
+        } else {
+            ret.setStatus(OrderReturn.ReturnStatus.APPROVED_REFUNDED);
+        }
+        ret.setInspectedByPharmacistId(principal != null ? principal.getId() : 1L);
+        ret.setPharmacistNotes(body != null ? body.get("notes") : "Inspected and approved by pharmacist");
+        orderReturnRepository.save(ret);
+
+        return ResponseEntity.ok(com.meditrack.common.ApiResponse.ok("Return marked as " + ret.getStatus(), ret));
+    }
+
+    @PostMapping("/returns/{id}/reject")
+    public ResponseEntity<com.meditrack.common.ApiResponse<OrderReturn>> rejectReturn(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @PathVariable Long id,
+            @RequestBody(required = false) Map<String, String> body) {
+        OrderReturn ret = orderReturnRepository.findById(id)
+                .orElseThrow(() -> new com.meditrack.common.BusinessException("Return request not found", org.springframework.http.HttpStatus.NOT_FOUND));
+
+        ret.setStatus(OrderReturn.ReturnStatus.REJECTED);
+        ret.setInspectedByPharmacistId(principal != null ? principal.getId() : 1L);
+        ret.setPharmacistNotes(body != null ? body.getOrDefault("reason", "Item rejected upon inspection") : "Item rejected upon inspection");
+        orderReturnRepository.save(ret);
+
+        return ResponseEntity.ok(com.meditrack.common.ApiResponse.ok("Return rejected", ret));
     }
 }

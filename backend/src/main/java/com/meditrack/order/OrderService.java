@@ -4,6 +4,7 @@ import com.meditrack.cart.Cart;
 import com.meditrack.cart.CartItem;
 import com.meditrack.cart.CartService;
 import com.meditrack.catalog.Product;
+import com.meditrack.common.AuditLogService;
 import com.meditrack.common.BusinessException;
 import com.meditrack.delivery.Delivery;
 import com.meditrack.delivery.DeliveryRepository;
@@ -48,6 +49,7 @@ public class OrderService {
     private final DeliveryRepository deliveryRepository;
     private final EmailService emailService;
     private final RealtimeTrackingService realtimeTrackingService;
+    private final AuditLogService auditLogService;
 
     @Autowired(required = false)
     private RabbitTemplate rabbitTemplate;
@@ -65,7 +67,8 @@ public class OrderService {
                         PaymentRepository paymentRepository,
                         DeliveryRepository deliveryRepository,
                         EmailService emailService,
-                        RealtimeTrackingService realtimeTrackingService) {
+                        RealtimeTrackingService realtimeTrackingService,
+                        AuditLogService auditLogService) {
         this.orderRepository = orderRepository;
         this.orderItemRepository = orderItemRepository;
         this.orderStateMachine = orderStateMachine;
@@ -77,6 +80,7 @@ public class OrderService {
         this.deliveryRepository = deliveryRepository;
         this.emailService = emailService;
         this.realtimeTrackingService = realtimeTrackingService;
+        this.auditLogService = auditLogService;
     }
 
     public static class CheckoutRequest {
@@ -119,8 +123,14 @@ public class OrderService {
             }
             Prescription rx = prescriptionRepository.findById(request.prescriptionId)
                     .orElseThrow(() -> new BusinessException("Prescription not found", HttpStatus.NOT_FOUND));
+            if (rx.getUserId() != null && !rx.getUserId().equals(customerId)) {
+                throw new BusinessException("Access denied: Attached prescription does not belong to your account", HttpStatus.FORBIDDEN);
+            }
             if (rx.getStatus() == PrescriptionStatus.REJECTED) {
                 throw new BusinessException("Attached prescription was rejected: " + rx.getRejectReason(), HttpStatus.UNPROCESSABLE_ENTITY);
+            }
+            if (rx.getValidTill() != null && rx.getValidTill().isBefore(java.time.LocalDate.now())) {
+                throw new BusinessException("Attached prescription has expired. Please upload a fresh prescription.", HttpStatus.UNPROCESSABLE_ENTITY);
             }
         }
 
@@ -249,6 +259,16 @@ public class OrderService {
         );
         realtimeTrackingService.publishNewOrderToPharmacists(order);
 
+        auditLogService.logAction(
+                customerId,
+                "ROLE_CUSTOMER",
+                "PLACE_ORDER",
+                "ORDER",
+                order.getId(),
+                "Order #" + order.getOrderNumber() + " placed. Total: Rs. " + order.getTotalAmount() + ", Items: " + order.getItems().size(),
+                "127.0.0.1"
+        );
+
         return order;
     }
 
@@ -371,6 +391,17 @@ public class OrderService {
         }
         Order savedOrder = orderRepository.save(order);
         realtimeTrackingService.publishOrderStatus(savedOrder.getId(), savedOrder.getOrderNumber(), savedOrder.getStatus().name(), reason);
+
+        auditLogService.logAction(
+                userId,
+                "USER",
+                "CANCEL_ORDER",
+                "ORDER",
+                savedOrder.getId(),
+                "Order #" + savedOrder.getOrderNumber() + " cancelled. Reason: " + reason,
+                "127.0.0.1"
+        );
+
         return savedOrder;
     }
 
@@ -401,6 +432,16 @@ public class OrderService {
                 saved.getOrderNumber(),
                 saved.getStatus().name(),
                 "Handed over at pharmacy counter"
+        );
+
+        auditLogService.logAction(
+                pharmacistId,
+                "ROLE_PHARMACIST",
+                "COUNTER_PICKUP_DELIVERED",
+                "ORDER",
+                saved.getId(),
+                "Order #" + saved.getOrderNumber() + " counter pickup verified with code.",
+                "127.0.0.1"
         );
 
         return saved;

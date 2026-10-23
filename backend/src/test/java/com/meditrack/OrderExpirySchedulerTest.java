@@ -58,7 +58,7 @@ class OrderExpirySchedulerTest {
         item.setQuantity(2);
         expiredOrder.setItems(List.of(item));
 
-        when(orderRepository.findAll()).thenReturn(List.of(expiredOrder));
+        when(orderRepository.findByStatusInAndPaymentMethodAndPlacedAtBefore(any(), any(), any())).thenReturn(List.of(expiredOrder));
         when(paymentRepository.findByOrderId(101L)).thenReturn(Optional.empty());
 
         scheduler.cancelUnpaidOrders();
@@ -76,13 +76,7 @@ class OrderExpirySchedulerTest {
     @Test
     @DisplayName("Does not cancel recently placed orders (< 15 mins)")
     void testDoNotCancelRecentOrders() {
-        Order recentOrder = new Order();
-        recentOrder.setId(102L);
-        recentOrder.setStatus(OrderStatus.PLACED);
-        recentOrder.setPaymentMethod(PaymentMethod.ONLINE);
-        recentOrder.setPlacedAt(LocalDateTime.now().minusMinutes(5));
-
-        when(orderRepository.findAll()).thenReturn(List.of(recentOrder));
+        when(orderRepository.findByStatusInAndPaymentMethodAndPlacedAtBefore(any(), any(), any())).thenReturn(List.of());
 
         scheduler.cancelUnpaidOrders();
 
@@ -102,7 +96,7 @@ class OrderExpirySchedulerTest {
         Payment successPayment = new Payment();
         successPayment.setStatus(PaymentStatus.SUCCESS);
 
-        when(orderRepository.findAll()).thenReturn(List.of(paidOrder));
+        when(orderRepository.findByStatusInAndPaymentMethodAndPlacedAtBefore(any(), any(), any())).thenReturn(List.of(paidOrder));
         when(paymentRepository.findByOrderId(103L)).thenReturn(Optional.of(successPayment));
 
         scheduler.cancelUnpaidOrders();

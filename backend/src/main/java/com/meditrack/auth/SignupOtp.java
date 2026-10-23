@@ -22,6 +22,9 @@ public class SignupOtp {
 
     private boolean verified = false;
 
+    @Column(name = "failed_attempts")
+    private int failedAttempts = 0;
+
     public SignupOtp() {}
 
     public SignupOtp(String email, String otp, LocalDateTime expiresAt) {
@@ -29,6 +32,7 @@ public class SignupOtp {
         this.otp = otp;
         this.expiresAt = expiresAt;
         this.verified = false;
+        this.failedAttempts = 0;
     }
 
     public Long getId() { return id; }
@@ -43,4 +47,7 @@ public class SignupOtp {
 
     public boolean isVerified() { return verified; }
     public void setVerified(boolean verified) { this.verified = verified; }
+
+    public int getFailedAttempts() { return failedAttempts; }
+    public void setFailedAttempts(int failedAttempts) { this.failedAttempts = failedAttempts; }
 }

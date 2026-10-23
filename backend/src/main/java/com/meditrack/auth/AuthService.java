@@ -202,7 +202,13 @@ public class AuthService {
         }
 
         if (!otp.getOtp().equals(request.getOtp().trim())) {
-            throw new BusinessException("Invalid OTP code. Please check and try again.", HttpStatus.BAD_REQUEST);
+            otp.setFailedAttempts(otp.getFailedAttempts() + 1);
+            if (otp.getFailedAttempts() >= 5) {
+                signupOtpRepository.delete(otp);
+                throw new BusinessException("Too many failed attempts. This OTP has been invalidated for security. Please request a new code.", HttpStatus.BAD_REQUEST);
+            }
+            signupOtpRepository.save(otp);
+            throw new BusinessException("Invalid OTP code. " + (5 - otp.getFailedAttempts()) + " attempt(s) remaining.", HttpStatus.BAD_REQUEST);
         }
 
         otp.setVerified(true);

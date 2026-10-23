@@ -32,6 +32,8 @@ public class DeliveryService {
     private final PaymentRepository paymentRepository;
     private final RealtimeTrackingService realtimeTrackingService;
     private final DeliveryPartnerProfileRepository deliveryPartnerProfileRepository;
+    private final com.meditrack.notification.EmailService emailService;
+    private final com.meditrack.common.AuditLogService auditLogService;
 
     public DeliveryService(DeliveryRepository deliveryRepository,
                            OrderRepository orderRepository,
@@ -39,7 +41,9 @@ public class DeliveryService {
                            UserRepository userRepository,
                            PaymentRepository paymentRepository,
                            RealtimeTrackingService realtimeTrackingService,
-                           DeliveryPartnerProfileRepository deliveryPartnerProfileRepository) {
+                           DeliveryPartnerProfileRepository deliveryPartnerProfileRepository,
+                           com.meditrack.notification.EmailService emailService,
+                           com.meditrack.common.AuditLogService auditLogService) {
         this.deliveryRepository = deliveryRepository;
         this.orderRepository = orderRepository;
         this.orderStateMachine = orderStateMachine;
@@ -47,6 +51,8 @@ public class DeliveryService {
         this.paymentRepository = paymentRepository;
         this.realtimeTrackingService = realtimeTrackingService;
         this.deliveryPartnerProfileRepository = deliveryPartnerProfileRepository;
+        this.emailService = emailService;
+        this.auditLogService = auditLogService;
     }
 
     @Transactional(readOnly = true)
@@ -155,7 +161,7 @@ public class DeliveryService {
 
         delivery.setDistanceKm(roadDistanceKm);
         delivery.setEtaMinutes((int) etaMinutes);
-        delivery = deliveryRepository.save(delivery);
+        final Delivery savedDelivery = deliveryRepository.save(delivery);
 
         realtimeTrackingService.publishOrderStatus(
                 order.getId(),
@@ -165,7 +171,26 @@ public class DeliveryService {
                 etaMinutes
         );
 
-        return delivery;
+        // Dispatch Delivery OTP email to the customer
+        if (order.getCustomerId() != null) {
+            userRepository.findById(order.getCustomerId()).ifPresent(cust -> {
+                if (cust.getEmail() != null && !cust.getEmail().isBlank()) {
+                    emailService.sendDeliveryOtpNotification(cust.getEmail(), order.getOrderNumber(), savedDelivery.getDeliveryOtp());
+                }
+            });
+        }
+
+        auditLogService.logAction(
+                partnerId,
+                "ROLE_DELIVERY",
+                "START_DELIVERY_JOURNEY",
+                "DELIVERY",
+                savedDelivery.getId(),
+                "Started delivery journey for Order #" + order.getOrderNumber() + ". Customer OTP dispatched via email.",
+                "127.0.0.1"
+        );
+
+        return savedDelivery;
     }
 
     @Transactional
@@ -239,6 +264,16 @@ public class DeliveryService {
                 "Delivered successfully"
         );
 
+        auditLogService.logAction(
+                partnerId,
+                "ROLE_DELIVERY",
+                "COMPLETE_DELIVERY",
+                "DELIVERY",
+                delivery.getId(),
+                "Order #" + order.getOrderNumber() + " successfully delivered with customer OTP verification.",
+                "127.0.0.1"
+        );
+
         return delivery;
     }
 
@@ -259,6 +294,16 @@ public class DeliveryService {
                 order.getOrderNumber(),
                 OrderStatus.DELIVERY_FAILED.name(),
                 "Delivery attempt failed: " + reason
+        );
+
+        auditLogService.logAction(
+                partnerId,
+                "ROLE_DELIVERY",
+                "FAIL_DELIVERY",
+                "DELIVERY",
+                delivery.getId(),
+                "Order #" + order.getOrderNumber() + " marked delivery failed. Reason: " + reason,
+                "127.0.0.1"
         );
 
         return delivery;

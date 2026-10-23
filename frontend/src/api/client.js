@@ -1,7 +1,15 @@
 import axios from 'axios';
 
+const getBaseUrl = () => {
+  if (import.meta.env.VITE_API_URL) return import.meta.env.VITE_API_URL;
+  if (typeof window !== 'undefined' && window.location.port === '5173') {
+    return 'http://localhost:8080/api';
+  }
+  return '/api';
+};
+
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || 'http://localhost:8080/api',
+  baseURL: getBaseUrl(),
   headers: {
     'Content-Type': 'application/json',
   },
@@ -54,7 +62,7 @@ api.interceptors.response.use(
         isRefreshing = true;
 
         try {
-          const res = await axios.post((import.meta.env.VITE_API_URL || 'http://localhost:8080/api') + '/auth/refresh', {
+          const res = await axios.post(getBaseUrl() + '/auth/refresh', {
             refreshToken,
           });
           const newAuth = res.data?.data;

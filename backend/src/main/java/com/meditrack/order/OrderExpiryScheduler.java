@@ -42,11 +42,11 @@ public class OrderExpiryScheduler {
     @Transactional
     public void cancelUnpaidOrders() {
         LocalDateTime cutoff = LocalDateTime.now().minusMinutes(15);
-        List<Order> activeOrders = orderRepository.findAll().stream()
-                .filter(o -> o.getStatus() == OrderStatus.PLACED || o.getStatus() == OrderStatus.PRESCRIPTION_PENDING || o.getStatus() == OrderStatus.CONFIRMED)
-                .filter(o -> o.getPlacedAt() != null && o.getPlacedAt().isBefore(cutoff))
-                .filter(o -> o.getPaymentMethod() == PaymentMethod.ONLINE)
-                .toList();
+        List<Order> activeOrders = orderRepository.findByStatusInAndPaymentMethodAndPlacedAtBefore(
+                List.of(OrderStatus.PLACED, OrderStatus.PRESCRIPTION_PENDING, OrderStatus.CONFIRMED),
+                PaymentMethod.ONLINE,
+                cutoff
+        );
 
         for (Order order : activeOrders) {
             Optional<Payment> optPayment = paymentRepository.findByOrderId(order.getId());

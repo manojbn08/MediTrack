@@ -27,17 +27,20 @@ public class AdminDashboardController {
     private final PaymentRepository paymentRepository;
     private final DeliveryPartnerProfileRepository deliveryPartnerProfileRepository;
     private final ProductBatchRepository batchRepository;
+    private final com.meditrack.delivery.DeliveryRepository deliveryRepository;
 
     public AdminDashboardController(UserRepository userRepository,
                                     OrderRepository orderRepository,
                                     PaymentRepository paymentRepository,
                                     DeliveryPartnerProfileRepository deliveryPartnerProfileRepository,
-                                    ProductBatchRepository batchRepository) {
+                                    ProductBatchRepository batchRepository,
+                                    com.meditrack.delivery.DeliveryRepository deliveryRepository) {
         this.userRepository = userRepository;
         this.orderRepository = orderRepository;
         this.paymentRepository = paymentRepository;
         this.deliveryPartnerProfileRepository = deliveryPartnerProfileRepository;
         this.batchRepository = batchRepository;
+        this.deliveryRepository = deliveryRepository;
     }
 
     @GetMapping("/dashboard")
@@ -51,11 +54,16 @@ public class AdminDashboardController {
         long activeUsers = userRepository.count();
         long nearExpiryCount = batchRepository.findNearExpiryBatches(LocalDate.now().plusDays(60)).size();
 
+        long totalDeliveries = deliveryRepository.count();
+        long completedDeliveries = deliveryRepository.findByStatus(com.meditrack.delivery.DeliveryStatus.DELIVERED).size();
+        String onTimeRate = totalDeliveries > 0 ?
+                String.format("%.1f%%", (completedDeliveries * 100.0) / totalDeliveries) : "100.0%";
+
         Map<String, Object> kpi = new HashMap<>();
         kpi.put("totalRevenue", Math.round(totalRevenue * 100.0) / 100.0);
         kpi.put("totalOrders", allOrders.size());
         kpi.put("activeUsers", activeUsers);
-        kpi.put("onTimeDeliveryRate", "97.4%");
+        kpi.put("onTimeDeliveryRate", onTimeRate);
         kpi.put("nearExpiryBatches", nearExpiryCount);
 
         return ResponseEntity.ok(ApiResponse.ok(kpi));

@@ -129,15 +129,17 @@ You can log in at http://localhost/login using these pre-seeded roles:
 
 | Role             | Email Address               | Password    | Portal / Features              |
 |------------------|-----------------------------|-------------|--------------------------------|
-| Admin            | admin@meditrack.com         | Admin@123   | User Management, Audit Logs    |
-| Pharmacist       | pharmacist@meditrack.com    | Pharm@123   | Prescription Approval, Batches |
-| Delivery Driver  | driver@meditrack.com        | Driver@123  | Live GPS Dispatch & OTP Entry  |
-| Customer         | customer@example.com        | Customer@123| Medicine Ordering & Tracking   |
+| Admin            | admin@meditrack.com         | Password@123| User Management, Audit Logs    |
+| Pharmacist       | pharmacist@meditrack.com    | Password@123| Prescription Approval, Batches |
+| Delivery Partner | delivery@meditrack.com      | Password@123| Live GPS Dispatch & OTP Entry  |
+| Customer         | customer@meditrack.com      | Password@123| Medicine Ordering & Tracking   |
+| Applicant (Pharm)| pending.pharmacist@meditrack.com | Password@123 | Pending Admin Approval Test |
+| Applicant (Rider)| pending.delivery@meditrack.com   | Password@123 | Pending Admin Approval Test |
 
 New Customer Registration:
   Go to http://localhost/register.
   Enter your details and email.
-  A 6-digit OTP will be dispatched via Angus Mail -> check http://localhost:8025.
+  A 6-digit OTP will be dispatched via Mailpit -> check http://localhost:8025.
   Enter the OTP to activate your account.
 
 ================================================================================

@@ -3,11 +3,12 @@ import { Link, useNavigate } from 'react-router-dom';
 import api from '../../api/client';
 import StatusChip from '../../components/StatusChip';
 import Button from '../../components/Button';
-import { Package, ArrowRight, Clock, MapPin } from 'lucide-react';
+import { Package, ArrowRight, Clock, MapPin, Download, Loader2 } from 'lucide-react';
 
 export default function Orders() {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [downloadingId, setDownloadingId] = useState(null);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -16,6 +17,44 @@ export default function Orders() {
       .catch(err => console.error(err))
       .finally(() => setLoading(false));
   }, []);
+
+  const handleDownloadInvoice = async (orderId, orderNumber) => {
+    setDownloadingId(orderId);
+    try {
+      const token = localStorage.getItem('meditrack_token');
+      const baseUrl = import.meta.env.VITE_API_URL || (window.location.port === '5173' ? 'http://localhost:8080/api' : '/api');
+      
+      // Request clean PDF invoice from /api/orders/{id}/invoice
+      let response = await fetch(`${baseUrl}/orders/${orderId}/invoice`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+
+      if (!response.ok) {
+        // Fallback to customer namespace
+        response = await fetch(`${baseUrl}/customer/orders/${orderId}/invoice`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+      }
+
+      if (!response.ok) {
+        throw new Error('Invoice PDF is not available yet.');
+      }
+
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `MediTrack-Invoice-${orderNumber}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => window.URL.revokeObjectURL(url), 1000);
+    } catch (err) {
+      alert(err.message || 'Invoice download failed');
+    } finally {
+      setDownloadingId(null);
+    }
+  };
 
   if (loading) {
     return (
@@ -92,11 +131,25 @@ export default function Orders() {
                   <span className="line-clamp-1">{order.deliveryAddressSnapshot}</span>
                 </div>
 
-                <div className="flex items-center justify-between sm:justify-end gap-4">
-                  <div className="text-right">
-                    <span className="text-[11px] text-neutral-500 mr-2">Total Amount:</span>
+                <div className="flex items-center justify-between sm:justify-end gap-3 flex-wrap">
+                  <div className="text-right mr-2">
+                    <span className="text-[11px] text-neutral-500 mr-2">Total:</span>
                     <strong className="text-sm font-mono-numbers text-brand">₹{order.totalAmount.toFixed(2)}</strong>
                   </div>
+
+                  <button
+                    onClick={() => handleDownloadInvoice(order.id, order.orderNumber)}
+                    disabled={downloadingId === order.id}
+                    className="text-xs font-medium px-3 py-1.5 rounded-control border border-neutral-300 text-neutral-700 hover:bg-neutral-50 inline-flex items-center gap-1.5 shadow-sm transition-colors disabled:opacity-50"
+                    title="Download clean GST PDF invoice"
+                  >
+                    {downloadingId === order.id ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin text-brand" />
+                    ) : (
+                      <Download className="w-3.5 h-3.5 text-neutral-500" />
+                    )}
+                    <span>Invoice PDF</span>
+                  </button>
 
                   <Link to={`/customer/orders/${order.id}/track`}>
                     <Button size="sm" variant="secondary" className="whitespace-nowrap">

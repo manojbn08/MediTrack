@@ -22,6 +22,24 @@ function AppContent() {
     }
 
     try {
+      // Merge guest cart items into user account upon login
+      const guestCartRaw = localStorage.getItem('meditrack_guest_cart');
+      if (guestCartRaw) {
+        try {
+          const guestCart = JSON.parse(guestCartRaw);
+          if (guestCart?.items?.length > 0) {
+            for (const item of guestCart.items) {
+              const pId = item.product?.id || item.productId;
+              if (pId) {
+                await api.post('/customer/cart/items', { productId: pId, quantity: item.quantity || 1 }).catch(() => {});
+              }
+            }
+          }
+        } finally {
+          localStorage.removeItem('meditrack_guest_cart');
+        }
+      }
+
       const res = await api.get('/customer/cart');
       setCart(res.data || { items: [] });
     } catch {

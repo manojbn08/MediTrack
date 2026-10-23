@@ -73,6 +73,22 @@ export default function AppRoutes({ cart, onAddToCart, onUpdateQuantity, onRemov
         } 
       />
       <Route 
+        path="/customer/orders/:id" 
+        element={
+          <ProtectedRoute allowedRoles={['CUSTOMER', 'DELIVERY', 'PHARMACIST', 'ADMIN']}>
+            <OrderTracking />
+          </ProtectedRoute>
+        } 
+      />
+      <Route 
+        path="/orders/:id" 
+        element={
+          <ProtectedRoute allowedRoles={['CUSTOMER', 'DELIVERY', 'PHARMACIST', 'ADMIN']}>
+            <OrderTracking />
+          </ProtectedRoute>
+        } 
+      />
+      <Route 
         path="/customer/prescriptions" 
         element={
           <ProtectedRoute allowedRoles={['CUSTOMER', 'ADMIN']}>
